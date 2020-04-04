@@ -1,0 +1,146 @@
+#!/bin/bash
+############################################################
+#                        METHODS                           #
+############################################################
+    fileStats="fileStats.jgtmp"
+transpose() {
+    echo transpose
+}
+
+# Prints out the dimensions of the matrix to the terminal.
+# Output: [rows] [columns]
+dims() {
+    
+    # Get row count, word count, and character count of the
+    # file and stick it into a test file.
+    wc $1 > $fileStats
+    
+    # Read the contents of the test file
+    read rowCount wordCount rest < $fileStats
+    
+    # Calculate the number of columns in the matrix
+    columnCount=$(expr $wordCount / $rowCount)
+    
+    # Print it out
+    echo $rowCount $columnCount
+}
+
+add() {
+    # Files to look hold the output of dims
+    fileOneStats='fileOne.jgtmp'
+    fileTwoStats='fileTwo.jgtmp'
+
+    # Call dims to get the dimensions of matrices.
+    dims $1 > $fileOneStats
+    dims $2 > $fileTwoStats
+
+    #Read the output dims and check if the dimensions are the same.
+    read f1Row f1Col < $fileOneStats
+    read f2Row f2Col < $fileTwoStats
+    if [ $f1Row -ne $f2Row ]
+    then
+        echo "These are different dimensions."
+        clearTmp
+        exit 3
+    elif [ $f1Col -ne $f2Col ]
+    then
+        echo "These are different dimensions."
+        clearTmp
+        exit 3
+    fi
+
+    # Get the dimensions of the output matrix.
+    outputCol=$f1Col
+    # Init arrays.
+    f1Arr=()
+    f2Arr=()
+
+    # Loop through each file, reading each line and each element
+    # in each line and push them into the appropriate array.
+    while read lineFirstFile && read lineSecondFile <&3
+    do
+        for x in $lineFirstFile
+        do
+            f1Arr+=("$x")
+        done 
+        for y in $lineSecondFile
+        do
+            f2Arr+=("$y")
+        done 
+    done <$1 3<$2
+    
+    # Once in an array, use an index and add them together into a new
+    # array.
+    answerArray=()
+    for((i=0; i<${#f1Arr[@]};i++))
+    do
+        answerArray+=($( expr ${f1Arr[i]} + ${f2Arr[i]} ))
+    done
+
+    # Format the matrix to the correct dimensions.
+    outputFile='out.jgtmp'
+    for((i=0; i<${#answerArray[@]};i++))
+    do
+        # Check if the value is at the end of the row. A value of n-1
+        # is at the end of the row where n is the number of columns.
+        isEndOfCol=$( expr $i % $outputCol )
+        lastColumn=$( expr $outputCol - 1 )
+        if [ $isEndOfCol == $lastColumn ] 
+        then
+            printf "${answerArray[i]}\n" >> $outputFile
+        else
+            if [ $i == 0 ] 
+            then
+                printf "${answerArray[i]}\t" > $outputFile
+            else
+                printf "${answerArray[i]}\t" >> $outputFile
+            fi
+
+        fi
+
+    done
+    cat $outputFile
+}
+
+mean() {
+    echo mean
+}
+
+multiply() {
+    echo multiply
+}
+clearTmp() {
+    rm -f *.jgtmp
+}
+############################################################
+#                       VALIDATION                         #
+############################################################
+
+############################################################
+#                          MAIN                            #
+############################################################
+if [ $# == 0 ]
+then
+    echo Error! No command found. Try transpose, add, dims, mean or multiply.
+    exit 1
+elif [ $1 == "transpose" ]
+then
+    transpose $2
+elif [ $1 == "dims" ]
+then
+    dims $2
+elif [ $1 == "add" ]
+then
+    add $2 $3
+elif [ $1 == "mean" ]
+then
+    mean $2
+elif [ $1 == "multiply" ]
+then
+    multiply $2
+else
+    echo Error! Command not found. Try transpose, dims, add, mean, or multiply.
+    exit 2
+fi
+clearTmp
+exit 0
