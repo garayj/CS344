@@ -1,99 +1,129 @@
 #!/bin/bash
 ############################################################
+#                        HELPERS                           #
+############################################################
+_getDims() {
+    # Get dimensions of matrix.
+    dims $1 >"dimensions-$$.jgtmp"
+    read rows columns <"dimensions-$$.jgtmp"
+}
+
+############################################################
 #                        METHODS                           #
 ############################################################
-    fileStats="fileStats.jgtmp"
 transpose() {
-    echo transpose
+    # Get dimensions of matrix.
+    _getDims $1
+
+    # Setup variables
+    total=$(expr $rows '*' $columns)
+    limit=$(expr $total - $columns)
+    outputFile='out.jgtmp'
+    # colTmp='colTmp.jgtmp'
+    # rowTmp='rowTmp.jgtmp'
+    array=()
+
+    # Read each line into an array.
+    while read line; do
+        for x in $line; do
+            array+=($x)
+        done
+    done <$1
+
+    # Loop over the array doing down each column and appending
+    # that value to the output file.
+
+    # This loop keeps track of the column the loop is on.
+    for ((i = 0; i < $columns; i++)); do
+        # This loop goes down the row within a column.
+        for ((n = $i; n < $total; n += $columns)); do
+            # This is a check if this is the last column in
+            # the row.
+            if [ $n -lt $limit ]; then
+                # Check if the output file exists.
+                if [ -f $outputFile ]; then
+                    printf "${array[n]}\t" >>$outputFile
+                else
+                    printf "${array[n]}\t" >$outputFile
+                fi
+            else
+                printf "${array[n]}\n" >>$outputFile
+            fi
+        done
+    done
+    cat $outputFile
 }
 
 # Prints out the dimensions of the matrix to the terminal.
-# Output: [rows] [columns]
 dims() {
-    
+    fileStats="fileStats-$$.jgtmp"
     # Get row count, word count, and character count of the
     # file and stick it into a test file.
-    wc $1 > $fileStats
-    
+    wc $1 >$fileStats
+
     # Read the contents of the test file
-    read rowCount wordCount rest < $fileStats
-    
+    read rowCount wordCount rest <$fileStats
+
     # Calculate the number of columns in the matrix
     columnCount=$(expr $wordCount / $rowCount)
-    
+
     # Print it out
     echo $rowCount $columnCount
 }
 
 add() {
-    # Files to look hold the output of dims
-    fileOneStats='fileOne.jgtmp'
-    fileTwoStats='fileTwo.jgtmp'
+    # Get dimensions of both matrices.
+    dim1=$(dims $1)
+    dim2=$(dims $2)
 
-    # Call dims to get the dimensions of matrices.
-    dims $1 > $fileOneStats
-    dims $2 > $fileTwoStats
-
-    #Read the output dims and check if the dimensions are the same.
-    read f1Row f1Col < $fileOneStats
-    read f2Row f2Col < $fileTwoStats
-    if [ $f1Row -ne $f2Row ]
-    then
-        echo "These are different dimensions."
-        clearTmp
-        exit 3
-    elif [ $f1Col -ne $f2Col ]
-    then
-        echo "These are different dimensions."
+    # Check if the dimensions are the same.
+    if [ "$dim1" != "$dim2" ]; then
+        echo "error 3: These are different dimensions." 1>&2
         clearTmp
         exit 3
     fi
 
     # Get the dimensions of the output matrix.
-    outputCol=$f1Col
+    dims $1 >"dims-$$.jgtmp"
+    read row col <"dims-$$.jgtmp"
+    outputCol=$col
+
     # Init arrays.
     f1Arr=()
     f2Arr=()
 
     # Loop through each file, reading each line and each element
     # in each line and push them into the appropriate array.
-    while read lineFirstFile && read lineSecondFile <&3
-    do
-        for x in $lineFirstFile
-        do
+    while read lineFirstFile && read lineSecondFile <&3; do
+        for x in $lineFirstFile; do
             f1Arr+=("$x")
-        done 
-        for y in $lineSecondFile
-        do
+        done
+        for y in $lineSecondFile; do
             f2Arr+=("$y")
-        done 
+        done
     done <$1 3<$2
-    
+
     # Once in an array, use an index and add them together into a new
     # array.
     answerArray=()
-    for((i=0; i<${#f1Arr[@]};i++))
-    do
-        answerArray+=($( expr ${f1Arr[i]} + ${f2Arr[i]} ))
+    for ((i = 0; i < ${#f1Arr[@]}; i++)); do
+        answerArray+=($(expr ${f1Arr[i]} + ${f2Arr[i]}))
     done
 
     # Format the matrix to the correct dimensions.
-    outputFile='out.jgtmp'
-    for((i=0; i<${#answerArray[@]};i++))
-    do
+    outputFile="out-$$.jgtmp"
+    for ((i = 0; i < ${#answerArray[@]}; i++)); do
         # Check if the value is at the end of the row. A value of n-1
         # is at the end of the row where n is the number of columns.
-        isEndOfCol=$( expr $i % $outputCol )
-        lastColumn=$( expr $outputCol - 1 )
-        if [ $isEndOfCol == $lastColumn ] 
-        then
-            printf "${answerArray[i]}\n" >> $outputFile
+        isEndOfCol=$(expr $i % $outputCol)
+        lastColumn=$(expr $outputCol - 1)
+        if [ $isEndOfCol == $lastColumn ]; then
+            printf "${answerArray[i]}\n" >>$outputFile
         else
-            if [ $i == 0 ] 
-            then
-                printf "${answerArray[i]}\t" > $outputFile
+            if [ $i == 0 ]; then
+                printf "${answerArray[i]}\t" >$outputFile
             else
-                printf "${answerArray[i]}\t" >> $outputFile
+                printf "${answerArray[i]}\t" >>$outputFile
             fi
 
         fi
@@ -103,10 +133,66 @@ add() {
 }
 
 mean() {
-    echo mean
+    # # Get dimensions of matrix.
+    _getDims $1
+    colTmp="colTmp-$$.jgtmp"
+    outputFile="out-$$.jgtmp"
+
+    # Loop through the each line looking at a specific index/coluk
+    for ((i = 0; i < $columns; i++)); do
+        index=$(expr $i + 1)
+        flag=0
+        while read line; do
+            if [ $flag == 0 ]; then
+                echo $line | cut -d ' ' -f $index >$colTmp
+                flag=1
+            else
+                echo $line | cut -d ' ' -f $index >>$colTmp
+
+            fi
+        done <$1
+
+        # Sum the numbers in the column.
+        acc=0
+        while read tmpLine; do
+            acc=$(expr $tmpLine + $acc)
+        done <$colTmp
+
+        # Use the formula to calculate mean.
+        step1=$(expr $rows / 2)
+        step2=$(expr $acc \> 0)
+        step3=$(expr $step2 \* 2 - 1)
+        step4=$(expr $step1 \* $step3)
+        step5=$(expr $acc + $step4)
+        mean=$(expr $step5 / $rows)
+
+        # Display them in the appropriate row.
+
+        # Check if the output file exists
+        if [ -f $outputFile ]; then
+            # Check if it's the last column in the row.
+            lastColumn=$(expr $columns - 1)
+            if [ $i == $lastColumn ]; then
+                printf "%d\n" $mean >>$outputFile
+            else
+                printf "%d\t" $mean >>$outputFile
+            fi
+        else
+            lastColumn=$(expr $columns - 1)
+            if [ $i == $lastColumn ]; then
+                printf "%d\n" $mean >$outputFile
+            else
+                printf "%d\t" $mean >$outputFile
+            fi
+
+        fi
+    done
+    cat $outputFile
 }
 
 multiply() {
+    dim1=$(dims $1)
+    dim2=$(dims $2)
     echo multiply
 }
 clearTmp() {
@@ -119,25 +205,19 @@ clearTmp() {
 ############################################################
 #                          MAIN                            #
 ############################################################
-if [ $# == 0 ]
-then
+if [ $# == 0 ]; then
     echo Error! No command found. Try transpose, add, dims, mean or multiply.
     exit 1
-elif [ $1 == "transpose" ]
-then
+elif [ $1 == "transpose" ]; then
     transpose $2
-elif [ $1 == "dims" ]
-then
+elif [ $1 == "dims" ]; then
     dims $2
-elif [ $1 == "add" ]
-then
+elif [ $1 == "add" ]; then
     add $2 $3
-elif [ $1 == "mean" ]
-then
+elif [ $1 == "mean" ]; then
     mean $2
-elif [ $1 == "multiply" ]
-then
-    multiply $2
+elif [ $1 == "multiply" ]; then
+    multiply $2 $3
 else
     echo Error! Command not found. Try transpose, dims, add, mean, or multiply.
     exit 2
