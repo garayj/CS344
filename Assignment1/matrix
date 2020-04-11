@@ -1,4 +1,5 @@
 #!/bin/bash
+trap "rm -f *.jgtmp; echo 'CTRL+C received, exiting'; exit 1" INT HUP TERM
 ############################################################
 #                        HELPERS                           #
 ############################################################
@@ -16,8 +17,8 @@ transpose() {
     _getDims $1
 
     # Setup variables
-    total=$(expr $rows '*' $columns)
-    limit=$(expr $total - $columns)
+    total=$(($rows * $columns))
+    limit=$(($total - $columns))
     outputFile='out.jgtmp'
     # colTmp='colTmp.jgtmp'
     # rowTmp='rowTmp.jgtmp'
@@ -42,12 +43,12 @@ transpose() {
             if [ $n -lt $limit ]; then
                 # Check if the output file exists.
                 if [ -f $outputFile ]; then
-                    printf "${array[n]}\t" >>$outputFile
+                    printf "%d\t" ${array[$n]} >>$outputFile
                 else
-                    printf "${array[n]}\t" >$outputFile
+                    printf "%d\t" ${array[$n]} >$outputFile
                 fi
             else
-                printf "${array[n]}\n" >>$outputFile
+                printf "%d\n" ${array[$n]} >>$outputFile
             fi
         done
     done
@@ -65,7 +66,7 @@ dims() {
     read rowCount wordCount rest <$fileStats
 
     # Calculate the number of columns in the matrix
-    columnCount=$(expr $wordCount / $rowCount)
+    columnCount=$(($wordCount / $rowCount))
 
     # Print it out
     echo $rowCount $columnCount
@@ -80,7 +81,7 @@ add() {
     if [ "$dim1" != "$dim2" ]; then
         echo "error 3: These are different dimensions." 1>&2
         clearTmp
-        exit 3
+        exit 6
     fi
 
     # Get the dimensions of the output matrix.
@@ -107,23 +108,24 @@ add() {
     # array.
     answerArray=()
     for ((i = 0; i < ${#f1Arr[@]}; i++)); do
-        answerArray+=($(expr ${f1Arr[i]} + ${f2Arr[i]}))
+        answerArray+=($((${f1Arr[$i]} + ${f2Arr[$i]})))
     done
 
     # Format the matrix to the correct dimensions.
     outputFile="out-$$.jgtmp"
-    for ((i = 0; i < ${#answerArray[@]}; i++)); do
+    for ((j = 0; j < ${#answerArray[@]}; j++)); do
+
         # Check if the value is at the end of the row. A value of n-1
         # is at the end of the row where n is the number of columns.
-        isEndOfCol=$(expr $i % $outputCol)
-        lastColumn=$(expr $outputCol - 1)
+        isEndOfCol=$(($j % $outputCol))
+        lastColumn=$(($outputCol - 1))
         if [ $isEndOfCol == $lastColumn ]; then
-            printf "${answerArray[i]}\n" >>$outputFile
+            printf "%d\n" ${answerArray[$j]} >>$outputFile
         else
             if [ $i == 0 ]; then
-                printf "${answerArray[i]}\t" >$outputFile
+                printf "%d\t" ${answerArray[$j]} >$outputFile
             else
-                printf "${answerArray[i]}\t" >>$outputFile
+                printf "%d\t" ${answerArray[$j]} >>$outputFile
             fi
 
         fi
@@ -140,42 +142,39 @@ mean() {
 
     # Loop through the each line looking at a specific index/coluk
     for ((i = 0; i < $columns; i++)); do
-        index=$(expr $i + 1)
+        index=$(($i + 1))
+        echo $index
         flag=0
         while read line; do
             if [ $flag == 0 ]; then
-                echo $line | cut -d ' ' -f $index >$colTmp
+                echo $line | cut -d $'\t' -f $index >$colTmp
                 flag=1
             else
-                echo $line | cut -d ' ' -f $index >>$colTmp
+                echo $line | cut -d $'\t' -f $index >>$colTmp
 
             fi
         done <$1
 
+        cat $colTmp
         # Sum the numbers in the column.
         acc=0
         while read tmpLine; do
-            acc=$(expr $tmpLine + $acc)
+            acc="$(($tmpLine + $acc))"
         done <$colTmp
 
         # Use the formula to calculate mean.
-        step1=$(expr $rows / 2)
-        step2=$(expr $acc \> 0)
-        step3=$(expr $step2 \* 2 - 1)
-        step4=$(expr $step1 \* $step3)
-        step5=$(expr $acc + $step4)
-        mean=$(expr $step5 / $rows)
+        mean=$((($acc + ($rows / 2 * (($acc > 0) * 2 - 1))) / $rows))
 
         # Display them in the appropriate row.
 
         # Check if the output file exists
         if [ -f $outputFile ]; then
             # Check if it's the last column in the row.
-            lastColumn=$(expr $columns - 1)
+            lastColumn=$(($columns - 1))
             if [ $i == $lastColumn ]; then
                 printf "%d\n" $mean >>$outputFile
             else
-                printf "%d\t" $mean >>$outputFile
+                printf "%d\n" $mean >>$outputFile
             fi
         else
             lastColumn=$(expr $columns - 1)
@@ -191,12 +190,124 @@ mean() {
 }
 
 multiply() {
-    dim1=$(dims $1)
-    dim2=$(dims $2)
-    echo multiply
+    # Get dimensions of matrix 1
+    _getDims $1
+    m1Row=$rows
+    m1Col=$columns
+
+    # Get dimensions of matrix 2
+    _getDims $2
+    m2Row=$rows
+    m2Col=$columns
+
+    # Check if it is possible to multiply matrices.
+    if [ $m1Col != $m2Row ]; then
+        echo "Error! These matrices cannot be multiplied. Incorrect dimensions." 1>&2
+        clearTmp
+        exit 5
+    fi
+
+    # Where we will store the answer for the multiplication.
+    outputArray=()
+
+    # Loop through each row in matrix 1 and
+    # push all values in the row on to an array.
+    while read line; do
+        m1RowArray=()
+        linearM2=()
+
+        # Init an array where we will accumulate.
+        outputRow=()
+        for ((i = 0; i < $m2Col; i++)); do
+            outputRow+=(0)
+        done
+
+        # Get a row from matrix 1
+        for x in $line; do
+            m1RowArray+=($x)
+        done
+
+        # Linearize matrix 2 and get it's length.
+        length=0
+        while read m2Line; do
+            for y in $m2Line; do
+                linearM2+=($y)
+                length=$(($length + 1))
+            done
+        done <$2
+
+        m1RowIndex=0
+        for ((index = 0; index < ${#linearM2[@]}; index++)); do
+            idx=$((index % $m2Col))
+            if [ $index != 0 ] && [ $idx == 0 ]; then
+                m1RowIndex=$(($m1RowIndex + 1))
+            fi
+
+            outputRow[$idx]=$((${outputRow[$idx]} + ${m1RowArray[$m1RowIndex]} * ${linearM2[$index]}))
+        done
+        outputArray=("${outputArray[@]}" "${outputRow[@]}")
+
+    done <$1
+    echo ${outputArray[*]}
+    # Loop through and store
+
 }
 clearTmp() {
     rm -f *.jgtmp
+}
+
+validator() {
+    tmp1="asdf$$.jgtmp"
+    tmp2="fdsa$$.jgtmp"
+    # Check if there are any arguments.
+    if [ $# == 0 ]; then
+
+        echo "Error! No command found. Try transpose, add, dims, mean or multiply." 1>&2
+        clearTmp
+        exit 1
+
+    # If there are arguments, check if it's either add or multiply.
+    elif [[ $1 == 'add' || $1 == 'multiply' ]]; then
+        # Check if there are any more/less arguments than needed.
+        if [ $# != 3 ]; then
+            echo "Error! Incorrect number of args provided. Ex: ./matrix [command] [file] [file]" 1>&2
+            clearTmp
+            exit 2
+        # Run function if the files are readable.
+        elif [ -r $2 ] && [ -r $3 ]; then
+            $@
+        # Otherwise error out.
+        else
+            cat $2
+            cat $3
+            echo "Error! File(s) not readable." 1>&2
+            clearTmp
+            exit 3
+        fi
+    # If there are arguments, check if it's any of the other commands.
+    elif [[ $1 == 'dims' || $1 == 'transpose' || $1 == 'dims' || $1 == 'mean' ]]; then
+        # Check if there are any more/less arguments than needed.
+        if [ $# != 2 ]; then
+            echo "Error! Incorrect number of args provided. Ex: ./matrix [command] [file]" 1>&2
+            clearTmp
+            exit 2
+            # Run function if the files are readable.
+        elif [ -r "$2" ]; then
+            $@
+        # Otherwise error out.
+        else
+            echo "Error! File(s) not readable." 1>&2
+            clearTmp
+            exit 3
+        fi
+
+    # If no recognized command is found, error out.
+    else
+        echo "Error! Command not recognized. Try transpose, add, dims, mean or multiply." 1>&2
+        clearTmp
+        exit 4
+    fi
+
 }
 ############################################################
 #                       VALIDATION                         #
@@ -205,22 +316,6 @@ clearTmp() {
 ############################################################
 #                          MAIN                            #
 ############################################################
-if [ $# == 0 ]; then
-    echo Error! No command found. Try transpose, add, dims, mean or multiply.
-    exit 1
-elif [ $1 == "transpose" ]; then
-    transpose $2
-elif [ $1 == "dims" ]; then
-    dims $2
-elif [ $1 == "add" ]; then
-    add $2 $3
-elif [ $1 == "mean" ]; then
-    mean $2
-elif [ $1 == "multiply" ]; then
-    multiply $2 $3
-else
-    echo Error! Command not found. Try transpose, dims, add, mean, or multiply.
-    exit 2
-fi
+validator $@
 clearTmp
 exit 0
