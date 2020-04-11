@@ -143,19 +143,17 @@ mean() {
     # Loop through the each line looking at a specific index/coluk
     for ((i = 0; i < $columns; i++)); do
         index=$(($i + 1))
-        echo $index
         flag=0
         while read line; do
             if [ $flag == 0 ]; then
-                echo $line | cut -d $'\t' -f $index >$colTmp
+                echo $line | cut -d ' ' -f $index >$colTmp
                 flag=1
             else
-                echo $line | cut -d $'\t' -f $index >>$colTmp
+                echo $line | cut -d ' ' -f $index >>$colTmp
 
             fi
         done <$1
 
-        cat $colTmp
         # Sum the numbers in the column.
         acc=0
         while read tmpLine; do
@@ -174,7 +172,7 @@ mean() {
             if [ $i == $lastColumn ]; then
                 printf "%d\n" $mean >>$outputFile
             else
-                printf "%d\n" $mean >>$outputFile
+                printf "%d\t" $mean >>$outputFile
             fi
         else
             lastColumn=$(expr $columns - 1)
@@ -209,6 +207,7 @@ multiply() {
 
     # Where we will store the answer for the multiplication.
     outputArray=()
+    outputFile='output.jgtmp'
 
     # Loop through each row in matrix 1 and
     # push all values in the row on to an array.
@@ -228,11 +227,9 @@ multiply() {
         done
 
         # Linearize matrix 2 and get it's length.
-        length=0
         while read m2Line; do
             for y in $m2Line; do
                 linearM2+=($y)
-                length=$(($length + 1))
             done
         done <$2
 
@@ -248,8 +245,19 @@ multiply() {
         outputArray=("${outputArray[@]}" "${outputRow[@]}")
 
     done <$1
-    echo ${outputArray[*]}
-    # Loop through and store
+    for ((n = 0; n < ${#outputArray[@]}; n++)); do
+        newLineTest=$(($n + 1))
+        if [ -f $outputFile ]; then
+            if [ $(($newLineTest % $m2Col)) != 0 ]; then
+                printf "%d\t" ${outputArray[$n]} >>$outputFile
+            else
+                printf "%d\n" ${outputArray[$n]} >>$outputFile
+            fi
+        else
+            printf "%d\t" ${outputArray[$n]} >$outputFile
+        fi
+    done
+    cat $outputFile
 
 }
 clearTmp() {
