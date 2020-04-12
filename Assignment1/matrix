@@ -5,15 +5,15 @@ trap "rm -f *.jgtmp; echo 'CTRL+C received, exiting'; exit 1" INT HUP TERM
 ############################################################
 # Get dimensions of matrix.
 function _getDims() {
-    dims $1 >"dimensions-$$.jgtmp"
-    read rows columns <"dimensions-$$.jgtmp"
+    dims $1 >"dimensions-.$$jgtmp"
+    read rows columns <"dimensions-.$$jgtmp"
 }
 
 # Takes 2 arguments, the number of columns in the matrix
 # and an array with all values in the matrix and prints
 # out the matrix to the terminal in the correct format.
 function _displayMatrix() {
-    outputFile='output.jgtmp'
+    outputFile="output.$$jgtmp"
     columns=$1
     shift
     arr=("$@")
@@ -53,7 +53,7 @@ function transpose() {
     # Get dimensions of matrix.
     _getDims $1
 
-    outputFile='out.jgtmp'
+    outputFile="out.$$jgtmp"
     linearInput=()
     linearOutput=()
 
@@ -78,7 +78,7 @@ function transpose() {
 }
 
 function dims() {
-    fileStats="fileStats-$$.jgtmp"
+    fileStats="fileStats-.$$jgtmp"
 
     # Get row count, word count, and character count of the
     # file and stick it into a test file.
@@ -107,8 +107,8 @@ function add() {
     fi
 
     # Get the dimensions of the output matrix.
-    dims $1 >"dims-$$.jgtmp"
-    read row col <"dims-$$.jgtmp"
+    dims $1 >"dims-.$$jgtmp"
+    read row col <"dims-.$$jgtmp"
     outputCol=$col
 
     # Init arrays.
@@ -142,7 +142,7 @@ function mean() {
     # Get dimensions of matrix.
     _getDims $1
 
-    colTmp="colTmp-$$.jgtmp"
+    colTmp="colTmp-.$$jgtmp"
     outputArray=()
 
     # Loop through the matrix, column by column, calculate the mean
@@ -250,7 +250,7 @@ function multiply() {
 
 # Remove all temp files with my file extension.
 function clearTmp() {
-    rm -f *.jgtmp
+    rm -f *.$$jgtmp
 }
 
 ############################################################
@@ -288,7 +288,7 @@ elif [[ $1 == 'dims' || $1 == 'transpose' || $1 == 'mean' ]]; then
 
     # If a there were no arguments passed to dims/transpose/mean, read from
     # stdin.
-    tmp1="stdin-$$.jgtmp"
+    tmp1="stdin-.$$jgtmp"
     if [ $# == 1 ]; then
         cat >$tmp1
         $1 $tmp1
