@@ -3,61 +3,83 @@ trap "rm -f *.jgtmp; echo 'CTRL+C received, exiting'; exit 1" INT HUP TERM
 ############################################################
 #                        HELPERS                           #
 ############################################################
-_getDims() {
-    # Get dimensions of matrix.
+# Get dimensions of matrix.
+function _getDims() {
     dims $1 >"dimensions-$$.jgtmp"
     read rows columns <"dimensions-$$.jgtmp"
+}
+
+# Takes 2 arguments, the number of columns in the matrix
+# and an array with all values in the matrix and prints
+# out the matrix to the terminal in the correct format.
+function _displayMatrix() {
+    outputFile='output.jgtmp'
+    columns=$1
+    shift
+    arr=("$@")
+
+    # Loop through all values in the array.
+    for ((n = 0; n < ${#arr[@]}; n++)); do
+
+        # Check if the file exists.
+        if [ -f $outputFile ]; then
+
+            # If the file exists and isn't at the end of
+            # a row, append the value at arr[n] to the
+            # output file along with a tab.
+            if [ $((($n + 1) % $columns)) != 0 ]; then
+                printf "%d\t" ${arr[$n]} >>$outputFile
+
+            # Else, append the value of arr[n] to the
+            # output file along with a new line.
+            else
+                printf "%d\n" ${arr[$n]} >>$outputFile
+            fi
+
+        # If the file doesn't exist, write the value of
+        # arr[n] to the file along with a tab.
+        else
+            printf "%d\t" ${arr[$n]} >$outputFile
+        fi
+    done
+
+    cat $outputFile
 }
 
 ############################################################
 #                        METHODS                           #
 ############################################################
-transpose() {
+function transpose() {
     # Get dimensions of matrix.
     _getDims $1
 
-    # Setup variables
-    total=$(($rows * $columns))
-    limit=$(($total - $columns))
     outputFile='out.jgtmp'
-    # colTmp='colTmp.jgtmp'
-    # rowTmp='rowTmp.jgtmp'
-    array=()
+    linearInput=()
+    linearOutput=()
 
     # Read each line into an array.
     while read line; do
         for x in $line; do
-            array+=($x)
+            linearInput+=($x)
         done
     done <$1
 
     # Loop over the array doing down each column and appending
     # that value to the output file.
 
-    # This loop keeps track of the column the loop is on.
-    for ((i = 0; i < $columns; i++)); do
-        # This loop goes down the row within a column.
-        for ((n = $i; n < $total; n += $columns)); do
-            # This is a check if this is the last column in
-            # the row.
-            if [ $n -lt $limit ]; then
-                # Check if the output file exists.
-                if [ -f $outputFile ]; then
-                    printf "%d\t" ${array[$n]} >>$outputFile
-                else
-                    printf "%d\t" ${array[$n]} >$outputFile
-                fi
-            else
-                printf "%d\n" ${array[$n]} >>$outputFile
-            fi
+    for ((i = 0; i < $columns; i++)); do                          # This loop keeps track of the column the loop is on.
+        for ((n = $i; n < ${#linearInput[@]}; n += $columns)); do # This loop goes down the row within a column.
+            linearOutput+=(${linearInput[$n]})
         done
     done
-    cat $outputFile
+
+    # Print matrix to the terminal.
+    _displayMatrix $rows "${linearOutput[@]}"
 }
 
-# Prints out the dimensions of the matrix to the terminal.
-dims() {
+function dims() {
     fileStats="fileStats-$$.jgtmp"
+
     # Get row count, word count, and character count of the
     # file and stick it into a test file.
     wc $1 >$fileStats
@@ -72,7 +94,7 @@ dims() {
     echo $rowCount $columnCount
 }
 
-add() {
+function add() {
     # Get dimensions of both matrices.
     dim1=$(dims $1)
     dim2=$(dims $2)
@@ -111,83 +133,51 @@ add() {
         answerArray+=($((${f1Arr[$i]} + ${f2Arr[$i]})))
     done
 
-    # Format the matrix to the correct dimensions.
-    outputFile="out-$$.jgtmp"
-    for ((j = 0; j < ${#answerArray[@]}; j++)); do
+    # Print matrix to the terminal.
+    _displayMatrix $outputCol "${answerArray[@]}"
 
-        # Check if the value is at the end of the row. A value of n-1
-        # is at the end of the row where n is the number of columns.
-        isEndOfCol=$(($j % $outputCol))
-        lastColumn=$(($outputCol - 1))
-        if [ $isEndOfCol == $lastColumn ]; then
-            printf "%d\n" ${answerArray[$j]} >>$outputFile
-        else
-            if [ $i == 0 ]; then
-                printf "%d\t" ${answerArray[$j]} >$outputFile
-            else
-                printf "%d\t" ${answerArray[$j]} >>$outputFile
-            fi
-
-        fi
-
-    done
-    cat $outputFile
 }
 
-mean() {
-    # # Get dimensions of matrix.
+function mean() {
+    # Get dimensions of matrix.
     _getDims $1
-    colTmp="colTmp-$$.jgtmp"
-    outputFile="out-$$.jgtmp"
 
-    # Loop through the each line looking at a specific index/coluk
+    colTmp="colTmp-$$.jgtmp"
+    outputArray=()
+
+    # Loop through the matrix, column by column, calculate the mean
+    # of each column, and display it in the terminal.
     for ((i = 0; i < $columns; i++)); do
         index=$(($i + 1))
-        flag=0
-        while read line; do
-            if [ $flag == 0 ]; then
-                echo $line | cut -d ' ' -f $index >$colTmp
-                flag=1
-            else
-                echo $line | cut -d ' ' -f $index >>$colTmp
 
+        # Read each line and cut out a specific column and append
+        # that value to the colTmp file.
+        while read line; do
+            if [[ -f $colTmp ]]; then
+                echo $line | cut -d ' ' -f $index >>$colTmp
+            else
+                echo $line | cut -d ' ' -f $index >$colTmp
             fi
         done <$1
 
-        # Sum the numbers in the column.
-        acc=0
+        # Once all values in a column are appended to colTmp, read colTmp,
+        # sum the values, and delete colTmp for the next column.
+        sum=0
         while read tmpLine; do
-            acc="$(($tmpLine + $acc))"
+            sum=$(($tmpLine + $sum))
         done <$colTmp
+        rm -rf $colTmp
 
-        # Use the formula to calculate mean.
-        mean=$((($acc + ($rows / 2 * (($acc > 0) * 2 - 1))) / $rows))
-
-        # Display them in the appropriate row.
-
-        # Check if the output file exists
-        if [ -f $outputFile ]; then
-            # Check if it's the last column in the row.
-            lastColumn=$(($columns - 1))
-            if [ $i == $lastColumn ]; then
-                printf "%d\n" $mean >>$outputFile
-            else
-                printf "%d\t" $mean >>$outputFile
-            fi
-        else
-            lastColumn=$(expr $columns - 1)
-            if [ $i == $lastColumn ]; then
-                printf "%d\n" $mean >$outputFile
-            else
-                printf "%d\t" $mean >$outputFile
-            fi
-
-        fi
+        # Use the formula to calculate mean and add it to the outputArray.
+        mean=$((($sum + ($rows / 2 * (($sum > 0) * 2 - 1))) / $rows))
+        outputArray+=($mean)
     done
-    cat $outputFile
+
+    # Print matrix to the terminal.
+    _displayMatrix $columns "${outputArray[@]}"
 }
 
-multiply() {
+function multiply() {
     # Get dimensions of matrix 1
     _getDims $1
     m1Row=$rows
@@ -205,125 +195,125 @@ multiply() {
         exit 5
     fi
 
-    # Where we will store the answer for the multiplication.
+    # Will be an array for the output matrix.
     outputArray=()
-    outputFile='output.jgtmp'
 
-    # Loop through each row in matrix 1 and
-    # push all values in the row on to an array.
     while read line; do
-        m1RowArray=()
-        linearM2=()
 
-        # Init an array where we will accumulate.
+        # For each row in the first matrix, create an array where it's length
+        # is equal to the length of the row and where each element is initialized to 0.
         outputRow=()
         for ((i = 0; i < $m2Col; i++)); do
             outputRow+=(0)
         done
 
-        # Get a row from matrix 1
+        # Place each integer in matrix 1 into an array.
+        m1RowArray=()
         for x in $line; do
             m1RowArray+=($x)
         done
 
-        # Linearize matrix 2 and get it's length.
+        # Linearize matrix 2 into an array from left to right.
+        linearM2=()
         while read m2Line; do
             for y in $m2Line; do
                 linearM2+=($y)
             done
         done <$2
 
+        # Becuase the second matrix was linearize, rather than calculate
+        # (M1Row X M2Column) this loop multiplies each element in each row
+        # by the appropriate number in matrix 1 and sums/stores that number
+        # in the appropriate index of the ouputRow array.
+
+        # m1RowIndex keeps track of the number in matrix 1 we are evaluating.
         m1RowIndex=0
         for ((index = 0; index < ${#linearM2[@]}; index++)); do
-            idx=$((index % $m2Col))
-            if [ $index != 0 ] && [ $idx == 0 ]; then
+            # outRowIdx keeps track of which index we will be making the calculating.
+            outRowIdx=$((index % $m2Col))
+            # Increment m1RowIndex once we reach the end of a row.
+            if [ $index != 0 ] && [ $outRowIdx == 0 ]; then
                 m1RowIndex=$(($m1RowIndex + 1))
             fi
 
-            outputRow[$idx]=$((${outputRow[$idx]} + ${m1RowArray[$m1RowIndex]} * ${linearM2[$index]}))
+            # Multiply matrix 1 value by matrix 2 value and add it to the running total.
+            outputRow[$outRowIdx]=$((${outputRow[$outRowIdx]} + ${m1RowArray[$m1RowIndex]} * ${linearM2[$index]}))
         done
+
+        # Append outputRow to outputArray.
         outputArray=("${outputArray[@]}" "${outputRow[@]}")
 
     done <$1
-    for ((n = 0; n < ${#outputArray[@]}; n++)); do
-        newLineTest=$(($n + 1))
-        if [ -f $outputFile ]; then
-            if [ $(($newLineTest % $m2Col)) != 0 ]; then
-                printf "%d\t" ${outputArray[$n]} >>$outputFile
-            else
-                printf "%d\n" ${outputArray[$n]} >>$outputFile
-            fi
-        else
-            printf "%d\t" ${outputArray[$n]} >$outputFile
-        fi
-    done
-    cat $outputFile
 
+    _displayMatrix $m2Col "${outputArray[@]}"
 }
-clearTmp() {
+
+# Remove all temp files with my file extension.
+function clearTmp() {
     rm -f *.jgtmp
 }
-
-validator() {
-    tmp1="asdf$$.jgtmp"
-    tmp2="fdsa$$.jgtmp"
-    # Check if there are any arguments.
-    if [ $# == 0 ]; then
-
-        echo "Error! No command found. Try transpose, add, dims, mean or multiply." 1>&2
-        clearTmp
-        exit 1
-
-    # If there are arguments, check if it's either add or multiply.
-    elif [[ $1 == 'add' || $1 == 'multiply' ]]; then
-        # Check if there are any more/less arguments than needed.
-        if [ $# != 3 ]; then
-            echo "Error! Incorrect number of args provided. Ex: ./matrix [command] [file] [file]" 1>&2
-            clearTmp
-            exit 2
-        # Run function if the files are readable.
-        elif [ -r $2 ] && [ -r $3 ]; then
-            $@
-        # Otherwise error out.
-        else
-            cat $2
-            cat $3
-            echo "Error! File(s) not readable." 1>&2
-            clearTmp
-            exit 3
-        fi
-    # If there are arguments, check if it's any of the other commands.
-    elif [[ $1 == 'dims' || $1 == 'transpose' || $1 == 'dims' || $1 == 'mean' ]]; then
-        # Check if there are any more/less arguments than needed.
-        if [ $# != 2 ]; then
-            echo "Error! Incorrect number of args provided. Ex: ./matrix [command] [file]" 1>&2
-            clearTmp
-            exit 2
-            # Run function if the files are readable.
-        elif [ -r "$2" ]; then
-            $@
-        # Otherwise error out.
-        else
-            echo "Error! File(s) not readable." 1>&2
-            clearTmp
-            exit 3
-        fi
-
-    # If no recognized command is found, error out.
-    else
-        echo "Error! Command not recognized. Try transpose, add, dims, mean or multiply." 1>&2
-        clearTmp
-        exit 4
-    fi
-
-}
-############################################################
-#                       VALIDATION                         #
-############################################################
 
 ############################################################
 #                          MAIN                            #
 ############################################################
-validator $@
+
+# Check if there are any arguments.
+if [ $# == 0 ]; then
+    echo "Error! No command found. Try transpose, add, dims, mean or multiply." 1>&2
+    clearTmp
+    exit 1
+
+# If there are arguments, check if it's either add or multiply.
+elif [[ $1 == 'add' || $1 == 'multiply' ]]; then
+
+    # Check if there are any more/less arguments than needed.
+    if [ $# != 3 ]; then
+        echo "Error! Incorrect number of args provided. Ex: ./matrix [command] [file] [file]" 1>&2
+        clearTmp
+        exit 2
+
+    # Run function if the files are readable.
+    elif [ -r $2 ] && [ -r $3 ]; then
+        $@
+
+    # Otherwise error out.
+    else
+        echo "Error! File(s) not readable." 1>&2
+        clearTmp
+        exit 3
+    fi
+
+# If there are arguments, check if it's any of the other commands.
+elif [[ $1 == 'dims' || $1 == 'transpose' || $1 == 'mean' ]]; then
+
+    # If a there were no arguments passed to dims/transpose/mean, read from
+    # stdin.
+    tmp1="stdin-$$.jgtmp"
+    if [ $# == 1 ]; then
+        cat >$tmp1
+        $1 $tmp1
+    else
+
+        # Run function if there are the correct number of arguments, there is a file,
+        # and that file is readable.
+        if [[ $# == 2 && -f "$2" && -r "$2" ]]; then
+            $@
+
+        # Otherwise error out.
+        else
+            echo "Error! File(s) not readable." 1>&2
+            clearTmp
+            exit 3
+        fi
+    fi
+
+# If no recognized command is found, error out.
+else
+    echo "Error! Command not recognized. Try transpose, add, dims, mean or multiply." 1>&2
+    clearTmp
+    exit 4
+fi
+
+# If everything was succuessful, clear out temp files, and exit.
 clearTmp
 exit 0
