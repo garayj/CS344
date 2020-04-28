@@ -12,7 +12,6 @@
 // Room Struct
 struct room
 {
-    struct room *connections[6];
     char *connections[6];
     char name[9];
     int numberOfConnections;
@@ -26,21 +25,16 @@ struct room rooms[7];
 //Function declarations.
 void getRoomsDirectory();
 void createMap();
+void storeRoomData(char *, int *, int);
+void freeTheHeap();
 
 int main(void)
 {
     // Get most recent directory name.
     getRoomsDirectory();
-    // create map.
+    // Create map.
     createMap();
-    printf("%s\n%s\n%d\n", rooms[0].name, rooms[0].type, rooms[0].numberOfConnections);
-    int i;
-    for (i = 0; i < rooms[0].numberOfConnections; i++)
-    {
-        printf("%s\n", rooms[0].connections[i]);
-        free(rooms[0].connections[i]);
-    }
-
+    freeTheHeap();
     return 0;
 }
 
@@ -73,60 +67,104 @@ void getRoomsDirectory()
 
 void createMap()
 {
+    // Set up needed variables.
+    int j = 0;         // j keeps track of which "middle" room I'm on.
+    struct dirent *de; // Directory entry poin
+
+    // Open the current directory, navigate to the correct directory, and
+    // read the directory while it is not null.
     DIR *dr = opendir(roomsDirectory);
-    struct dirent *de;
-    char readBuffer[128];
-    FILE *file;
-    char *line = NULL;
-    size_t len = 0;
-    ssize_t nread;
-
     chdir(roomsDirectory);
-
-    // Reading the directory.
     while ((de = readdir(dr)) != NULL)
     {
+        char *line = NULL;
         int i = 0;
-        // Look for specific files in the directory.
-        // I've added startRoom, mid and endRoom as
-        // file postfixes to look for.
-        if (strstr(de->d_name, "startRoom"))
+        // Check if the file is one of the room files.
+        if (strstr(de->d_name, "startRoom") || strstr(de->d_name, "mid") || strstr(de->d_name, "endRoom"))
         {
-            file = fopen(de->d_name, "r");
-
-            // Reads the first line.
+            size_t len = 0;
+            ssize_t nread;
+            if (strstr(de->d_name, "mid"))
+                j++;
+            // Open the file and start reading the contents.
+            FILE *file = fopen(de->d_name, "r");
             while (getline(&line, &len, file) > 0)
             {
-                char t1[10];
-                char t2[10];
-                char data[20];
-                memset(data, '\0', sizeof(data));
-                memset(t1, '\0', sizeof(t1));
-                memset(t2, '\0', sizeof(t2));
-
-                sscanf(line, "%s %s %s", t1, t2, data);
-                // If the line is the first line.
-                if (strcmp(t2, "NAME:") == 0)
+                // If it's the start room, create the room in rooms[0] so that the start
+                // room will always be at index 0.
+                if (strstr(de->d_name, "startRoom"))
                 {
-                    strcpy(rooms[0].name, data);
+                    storeRoomData(line, &i, 0);
+                    rooms[0].type = "START_ROOM";
                 }
-                // Get the connections.
-                else if (strcmp(t1, "CONNECTION") == 0)
+                // If it's a middle room, increment j and place the new room at index j.
+                else if (strstr(de->d_name, "mid"))
                 {
-                    printf("hi\n");
-                    rooms[0].connections[i] = (char *)calloc(strlen(data) + 1, sizeof(char));
-                    strcpy(rooms[0].connections[i], data);
-                    i++;
-                    rooms[0].numberOfConnections = i;
+                    storeRoomData(line, &i, j);
+                    rooms[j].type = "MID_ROOM";
+                }
+                // If it's the end room, create the room in rooms[6] so that the end
+                // room will always be at index 6.
+                else
+                {
+                    storeRoomData(line, &i, 6);
+                    rooms[6].type = "END_ROOM";
                 }
             }
-
-            // Assign type.
-
-            rooms[0].type = "START_ROOM";
             fclose(file);
         }
+        // Free the memory at line before another use/the end of this file.
+        free(line);
     }
-    free(line);
+    // Close out the opened directory.
     closedir(dr);
+}
+
+// Takes the line read in from the file and adds that lines data to the appropriate room.
+void storeRoomData(char *line, int *i, int index)
+{
+    // Declare variables.
+    char t1[10];
+    char t2[10];
+    char data[20];
+
+    // Clear them out to null terminators.
+    memset(data, '\0', sizeof(data));
+    memset(t1, '\0', sizeof(t1));
+    memset(t2, '\0', sizeof(t2));
+
+    // Split the line into 3 variables.
+    sscanf(line, "%s %s %s", t1, t2, data);
+
+    // If the line is the first line, pull out the name of the room.
+    if (strcmp(t2, "NAME:") == 0)
+        strcpy(rooms[index].name, data);
+
+    // Else it a connection and we loop over and get the names of the rooms connected to
+    // this room. Allocate memory for the names, copy the name into the connecitons property,
+    // and increment the number of connections that the room has.
+    else if (strcmp(t1, "CONNECTION") == 0)
+    {
+        rooms[index].connections[*i] = (char *)calloc(strlen(data) + 1, sizeof(char));
+        strcpy(rooms[index].connections[*i], data);
+        (*i)++;
+        rooms[index].numberOfConnections = *i;
+    }
+}
+
+void freeTheHeap()
+{
+    int i;
+    int j;
+    for (j = 0; j < 7; j++)
+    {
+        printf("Room: %s\n", rooms[j].name);
+        printf("Connections: %d\n", rooms[j].numberOfConnections);
+
+        for (i = 0; i < rooms[j].numberOfConnections; i++)
+        {
+            printf("Connection: %s\n", rooms[j].connections[i]);
+            free(rooms[j].connections[i]);
+        }
+    }
 }

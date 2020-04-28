@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <time.h>
 #include <fcntl.h>
@@ -64,7 +65,7 @@ int main()
   char *dirName = calloc(30, sizeof(char));
   int pid = getpid();                            // Get the process id.
   snprintf(dirName, 30, "garayj.rooms.%d", pid); // puts string into buffer
-  mkdir(dirName);
+  mkdir(dirName, 0700);
 
   // List of room names that will be used. Initialize the array to be blank.
   char *usedRoomNames[MAX_ROOMS];
