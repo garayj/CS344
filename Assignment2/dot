@@ -1,2 +1,5 @@
 gcc -o garayj.buildrooms garayj.buildrooms.c -g
 ./garayj.buildrooms
+
+gcc -o garayj.adventure garayj.adventure.c -g
+./garayj.adventure

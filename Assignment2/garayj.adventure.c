@@ -12,28 +12,46 @@
 // Room Struct
 struct room
 {
+    struct room *connectingRoom[6];
     char *connections[6];
     char name[9];
     int numberOfConnections;
     char *type;
 };
 
+// Create the bool type.
+typedef enum
+{
+    false,
+    true
+} bool;
+
 // Global variables.
 char roomsDirectory[40];
 struct room rooms[7];
+char *path[100];
+struct room *currentRoom;
 
 //Function declarations.
 void getRoomsDirectory();
-void createMap();
+void createRoomsFromFiles();
 void storeRoomData(char *, int *, int);
+void linkRooms();
+void play();
+void printGamePrompt();
 void freeTheHeap();
 
 int main(void)
 {
     // Get most recent directory name.
     getRoomsDirectory();
-    // Create map.
-    createMap();
+    // Create room structs from the files and store in global rooms variable.
+    createRoomsFromFiles();
+    // Stitches the rooms together.
+    linkRooms();
+    // Starts the game cycle.
+    play();
+
     freeTheHeap();
     return 0;
 }
@@ -65,7 +83,7 @@ void getRoomsDirectory()
     closedir(dr);
 }
 
-void createMap()
+void createRoomsFromFiles()
 {
     // Set up needed variables.
     int j = 0;         // j keeps track of which "middle" room I'm on.
@@ -151,20 +169,135 @@ void storeRoomData(char *line, int *i, int index)
         rooms[index].numberOfConnections = *i;
     }
 }
+void linkRooms()
+{
+    int i;
+    int j;
+    int k;
+    // For every room in our global "rooms" variable.
+    for (i = 0; i < 7; i++)
+    {
+        // Loop over all of the connections (names of rooms) for a given room.
+        for (j = 0; j < rooms[i].numberOfConnections; j++)
+        {
+            // Loop through all of the rooms looking for a name match.
+            for (k = 0; k < 7; k++)
+            {
+                // Skip if I'm looking at the same room.
+                if (k == i)
+                    continue;
+                // If there is a match, link the rooms.
+                if (strcmp(rooms[i].connections[j], rooms[k].name) == 0)
+                {
+                    rooms[i].connectingRoom[j] = &rooms[k];
+                    break;
+                }
+            }
+        }
+    }
+}
+
+void play()
+{
+    // Init/Define variables.
+    bool isGameOver = false;
+    int numberOfMoves = 0;
+    size_t len = 0;
+    ssize_t nread;
+    // Set the current room to the start room.
+    currentRoom = &(rooms[0]);
+
+    // Loop until the winning conditions are met.
+    while (!isGameOver)
+    {
+        // Set up variables.
+        char *line = NULL;
+        printGamePrompt();
+        // Get input from user.
+        int numCharsEntered = getline(&line, &len, stdin);
+        // Replace the newline with a null terminator and then print a newline.
+        line[numCharsEntered - 1] = '\0';
+        printf("\n");
+
+        // Check if it's the string "time"
+        if (strcmp(line, "time") == 0)
+            printf("This is the time.\n\n");
+        else
+        {
+            // Check if that is a location in the list.
+            int j;
+            int k = currentRoom->numberOfConnections;
+            for (j = 0; j < k; j++)
+            {
+                // Compare the stdin to all the room names. If a match is found,
+                // move the current room pointer to the new room, add the room name
+                // to the path list, increment the number of moves and break out of
+                // the loop.
+                if (strcmp(line, currentRoom->connectingRoom[j]->name) == 0)
+                {
+                    currentRoom = currentRoom->connectingRoom[j];
+                    path[numberOfMoves] = currentRoom->name;
+                    numberOfMoves++;
+                    break;
+                }
+            }
+
+            // Check if the user is at the end room.
+            if (currentRoom->type == "END_ROOM")
+            {
+                isGameOver = true;
+                printf("YOU HAVE FOUND THE END ROOM. CONGRATULATIONS! YOU TOOK %d STEPS. YOUR PATH TO VICTORY WAS:\n", numberOfMoves);
+                int n;
+                for (n = 0; n < numberOfMoves; n++)
+                    printf("%s\n", path[n]);
+            }
+
+            // If the loop (j) has reached the end of the loop (j == k) without finding a match,
+            // print the error message.
+            else if (j == k)
+                printf("HUH? I DON'T UNDERSTAND THAT ROOM. TRY AGAIN.\n\n");
+        }
+        free(line);
+    }
+}
+
+void printGamePrompt()
+{
+    int i;
+    char connectionString[90];
+    memset(connectionString, '\0', sizeof(connectionString));
+
+    // Print current location.
+    printf("CURRENT LOCATION: %s\n", currentRoom->name);
+
+    // Prints out the rooms connected to the current room.
+
+    // Copy the first name into connectionString,
+    strcpy(connectionString, currentRoom->connections[0]);
+
+    // Loop over the rest of the connections.
+    for (i = 1; i < currentRoom->numberOfConnections; i++)
+    {
+        // Allocate memory on the heap for creating a new formatted string.
+        char *roomName = calloc(11, sizeof(char));
+        // Format the string.
+        snprintf(roomName, 11, ", %s", currentRoom->connectingRoom[i]->name);
+        // Concatenate it with connectionString.
+        strcat(connectionString, roomName);
+        // Free memory.
+        free(roomName);
+    }
+    // After loop, add a period.
+    strcat(connectionString, ".");
+    printf("POSSIBLE CONNECTIONS: %s\n", connectionString);
+    printf("WHERE TO? >");
+}
 
 void freeTheHeap()
 {
     int i;
     int j;
     for (j = 0; j < 7; j++)
-    {
-        printf("Room: %s\n", rooms[j].name);
-        printf("Connections: %d\n", rooms[j].numberOfConnections);
-
         for (i = 0; i < rooms[j].numberOfConnections; i++)
-        {
-            printf("Connection: %s\n", rooms[j].connections[i]);
             free(rooms[j].connections[i]);
-        }
-    }
 }
