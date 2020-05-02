@@ -31,8 +31,12 @@ char roomsDirectory[40];
 struct room rooms[7];
 char *path[100];
 struct room *currentRoom;
+pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 
 //Function declarations.
+void createThreadToStoreTime();
+void *storeTime();
+void readAndPrintTime();
 void getRoomsDirectory();
 void createRoomsFromFiles();
 void storeRoomData(char *, int *, int);
@@ -134,6 +138,7 @@ void createRoomsFromFiles()
         // Free the memory at line before another use/the end of this file.
         free(line);
     }
+    chdir("..");
     // Close out the opened directory.
     closedir(dr);
 }
@@ -197,6 +202,23 @@ void linkRooms()
     }
 }
 
+void readAndPrintTime()
+{
+    // Setup variables to print out the time.
+    char fileBuffer[40];
+    memset(&fileBuffer, '\0', 40);
+    char *line = NULL;
+    size_t len = 0;
+
+    // Open file, read the line, printit out, close the file,
+    // and free the line.
+    FILE *file = fopen("currentTime.txt", "r");
+    getline(&line, &len, file);
+    printf("%s\n\n", line);
+    fclose(file);
+    free(line);
+}
+
 void play()
 {
     // Init/Define variables.
@@ -221,7 +243,10 @@ void play()
 
         // Check if it's the string "time"
         if (strcmp(line, "time") == 0)
-            printf("This is the time.\n\n");
+        {
+            createThreadToStoreTime();
+            readAndPrintTime();
+        }
         else
         {
             // Check if that is a location in the list.
@@ -293,8 +318,44 @@ void printGamePrompt()
     printf("WHERE TO? >");
 }
 
+void createThreadToStoreTime()
+{
+    int resultInt;
+    pthread_t myThreadID;
+
+    resultInt = pthread_create(
+        &myThreadID,
+        NULL,
+        storeTime,
+        NULL);
+    resultInt = pthread_join(myThreadID, NULL);
+}
+
+void *storeTime()
+{
+    // Set up variables for strftime and lock.
+    pthread_mutex_lock(&lock);
+    char timeBuffer[40];
+    size_t size = 40;
+    char *format = "%l:%M %p, %A, %B %d, %Y";
+    time_t t = time(NULL);
+    struct tm *tm;
+
+    // Clear buffer.
+    memset(&timeBuffer, '\0', 40);
+    tm = localtime(&t);
+    strftime(timeBuffer, size, format, tm);
+
+    FILE *file = fopen("currentTime.txt", "w");
+    fwrite(timeBuffer, sizeof(char), sizeof(timeBuffer), file);
+    fclose(file);
+    pthread_mutex_unlock(&lock);
+}
+
 void freeTheHeap()
 {
+    // Delete lock and clean up memory.
+    pthread_mutex_destroy(&lock);
     int i;
     int j;
     for (j = 0; j < 7; j++)
