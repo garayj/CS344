@@ -244,7 +244,9 @@ void play()
         // Check if it's the string "time"
         if (strcmp(line, "time") == 0)
         {
+            // Create a thread that gets the time and stores it in a file.
             createThreadToStoreTime();
+            // Reads that file and prints the time to the console.
             readAndPrintTime();
         }
         else
@@ -336,7 +338,6 @@ void *storeTime()
     // Set up variables for strftime and lock.
     pthread_mutex_lock(&lock);
     char timeBuffer[40];
-    size_t size = 40;
     char *format = "%l:%M %p, %A, %B %d, %Y";
     time_t t = time(NULL);
     struct tm *tm;
@@ -344,7 +345,7 @@ void *storeTime()
     // Clear buffer and get the time.
     memset(&timeBuffer, '\0', 40);
     tm = localtime(&t);
-    strftime(timeBuffer, size, format, tm);
+    strftime(timeBuffer, 40, format, tm);
 
     // Open file, write the time, close the file and unlock the thread.
     FILE *file = fopen("currentTime.txt", "w");
