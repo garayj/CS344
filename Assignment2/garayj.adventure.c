@@ -341,11 +341,12 @@ void *storeTime()
     time_t t = time(NULL);
     struct tm *tm;
 
-    // Clear buffer.
+    // Clear buffer and get the time.
     memset(&timeBuffer, '\0', 40);
     tm = localtime(&t);
     strftime(timeBuffer, size, format, tm);
 
+    // Open file, write the time, close the file and unlock the thread.
     FILE *file = fopen("currentTime.txt", "w");
     fwrite(timeBuffer, sizeof(char), sizeof(timeBuffer), file);
     fclose(file);
