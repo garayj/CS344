@@ -8,8 +8,8 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <signal.h>
-#include <math.h>
 
+// Boolean definition.
 typedef enum
 {
   false,
@@ -17,30 +17,35 @@ typedef enum
 } bool;
 
 // Functions
+void initSignalHandlers();
 void checkChildProcessStatus();
-void getInput(char *);
+int getInput(char *);
 void findAndReplaceDollars(char *, char **);
-bool commentOrEmptyCheck(char *);
+bool commentOrEmptyCheck(int, char *);
 void handleSignal(int);
-int findSpace(char *, int);
-void buildArgv(char **, char *);
-int commandLen(char *);
-int searchPipe(int, char *);
-void setInOut(char *, int, int);
+void createArgs(char *, char **, char *, char *);
+void openIOFiles(char *, char *);
+void executeSystemCall(char *);
 void nullOutput();
+void catchSIGINT(int);
+void catchSIGTSTP(int);
 
 // Global variables.
+sigset_t my_signal_set;
 bool isForegroundMode = false;
 size_t BUFFER_SIZE = 2049;
 pid_t childThread;
+char *sigMessage;
+int sigLength;
+// pid_t backgroundThreads[];
+// int backgroundStatuses[];
+int numberOfBackgroundThreads = 0;
 int childStatus = -99;
 int parentStatus = 0;
 
 int main()
 {
-  // Signal Handlers for cmd-C and cmd-Z
-  signal(SIGINT, handleSignal);
-  signal(SIGTSTP, handleSignal);
+  initSignalHandlers();
 
   // Main prompt loop
   while (true)
@@ -50,20 +55,18 @@ int main()
     checkChildProcessStatus();
 
     // Print out the command line symbol and read input from the user.
-    getInput(input);
-
-    // Store the input pointer in tmp and search and replace all instances of "$$".
-    findAndReplaceDollars(input, &input);
+    int numCharEntered = getInput(input);
 
     // Check if the input is a comment or just a newline.
-    if (!commentOrEmptyCheck(input))
+    if (!commentOrEmptyCheck(numCharEntered, input))
     {
-      // Make a copy of input just in case I need an un messed with string.
+      // Store the input pointer in tmp and search and replace all instances of "$$".
+      // findAndReplaceDollars(input, &input);
+
       char inputTmp[BUFFER_SIZE];
       memset(inputTmp, '\0', sizeof(inputTmp));
       strcpy(inputTmp, input);
 
-      char newLine = '\n';
       char *token = strtok(inputTmp, " \n");
 
       // Check for the supported built in commands.
@@ -87,42 +90,49 @@ int main()
         {
           if (chdir(token) == -1)
           {
-            printf("%s: %s\n", token, strerror(errno));
-            fflush(stdout);
+            perror(token);
           }
         }
         parentStatus = 0;
       }
+      // ******************************************************************************
+      // The command is not one of the ones I handle.
       else
       {
-        // Make a system call.
         bool isBackgroundProcess = false;
-        int lastIndex = strlen(input) - 2;
+        int inputLen = strlen(input);
+
         // Look for if the process needs to run in the background.
-        if (input[lastIndex] == '&')
+        if (input[inputLen - 2] == '&')
         {
+          input[inputLen - 2] = '\0';
+          // Check if we are runnning in foreground mode. If we aren't
+          // switch the flag to true. In any case, remove the ampersand.
           if (!isForegroundMode)
             isBackgroundProcess = true;
-          input[lastIndex] = '\0';
         }
+        // Remove the newline character if
+        else
+          input[inputLen - 1] = '\0';
+
+        // Create a child thread.
         childThread = fork();
+        // If the creation of the thread is corrupted somehow,
+        // shoot out an error.
         if (childThread == -1)
         {
           perror("Fork is bork!");
           parentStatus = -1;
         }
+        // If the process is the child process.
         else if (childThread == 0)
         {
+          // Check if the child process is a background process.
           if (isBackgroundProcess)
-          {
             nullOutput();
-            signal(SIGINT, SIG_IGN);
-            signal(SIGTSTP, SIG_IGN);
-          }
-          int reDirOut = searchPipe(0, input);
-          int reDirIn = searchPipe(1, input);
-          setInOut(input, reDirOut, reDirIn);
+          executeSystemCall(input);
         }
+        // Else the process is the parent process.
         else
         {
           if (isBackgroundProcess)
@@ -150,6 +160,22 @@ int main()
   return 0;
 }
 
+void initSignalHandlers()
+{
+  struct sigaction action_SIGINT = {0};
+  struct sigaction action_SIGTSTP = {0};
+
+  action_SIGINT.sa_handler = catchSIGINT;
+  action_SIGINT.sa_flags = 0;
+  sigfillset(&action_SIGINT.sa_mask);
+  sigaction(SIGINT, &action_SIGINT, NULL);
+
+  action_SIGTSTP.sa_handler = catchSIGTSTP;
+  action_SIGTSTP.sa_flags = 0;
+  sigfillset(&action_SIGTSTP.sa_mask);
+  sigaction(SIGTSTP, &action_SIGTSTP, NULL);
+}
+
 void checkChildProcessStatus()
 {
   waitpid(-1, &childStatus, WNOHANG);
@@ -161,7 +187,6 @@ void checkChildProcessStatus()
     }
     else
     {
-
       printf("background pid %d is done: terminated by signal %d\n", childThread, WTERMSIG(childStatus));
     }
     childStatus = -99;
@@ -169,22 +194,22 @@ void checkChildProcessStatus()
   }
 }
 
-void getInput(char *input)
+int getInput(char *input)
 {
   printf(": ");
   fflush(stdout);
-  getline(&input, &BUFFER_SIZE, stdin);
+  return getline(&input, &BUFFER_SIZE, stdin);
 }
 
 void findAndReplaceDollars(char *input, char **inputAddress)
 {
   int pidInt = (int)getpid();
-  int nDigits = floor(log10(abs(pidInt))) + 1;
-  char pid[nDigits];
+  char pid[10];
+  memset(pid, '\0', sizeof(pid));
   char *dollars = "$$";
-  snprintf(pid, nDigits + 1, "%d", pidInt);
+  snprintf(pid, 10, "%d", pidInt);
 
-  char *dest = malloc(strlen(input) - strlen(dollars) + strlen(pid) + 1);
+  char *dest = calloc(strlen(input) - strlen(dollars) + strlen(pid) + 1, sizeof(char));
   char *destptr = dest;
 
   *dest = 0;
@@ -209,9 +234,14 @@ void findAndReplaceDollars(char *input, char **inputAddress)
   *inputAddress = dest;
 }
 
-bool commentOrEmptyCheck(char *input)
+bool commentOrEmptyCheck(int numChars, char *input)
 {
-  if (input[0] == '\n' || input[0] == '#')
+  if (numChars == -1)
+  {
+    clearerr(stdin);
+    return true;
+  }
+  if (input[0] == '#' || input[0] == '\n')
   {
     parentStatus = 0;
     return true;
@@ -219,156 +249,144 @@ bool commentOrEmptyCheck(char *input)
   return false;
 }
 
-int findSpace(char *str, int pos)
+void executeSystemCall(char *input)
 {
-  int i;
-  for (i = pos; i < strlen(str) - 1; i++)
+  // Init and clear data for arguments.
+  char *args[512];
+  int j;
+  for (j = 0; j < 512; j++)
   {
-    if (str[i] == ' ')
-    {
-      return i;
-    }
+    args[j] = calloc(50, sizeof(char));
   }
-  return -1;
+
+  // Init and clear data for the input file name if one is specified.
+  char inputFile[40];
+  memset(inputFile, '\0', sizeof(inputFile));
+
+  // Init and clear data for the output file name if one is specified.
+  char outputFile[40];
+  memset(outputFile, '\0', sizeof(outputFile));
+
+  // Create and store our arguments into the args array.
+  createArgs(input, args, inputFile, outputFile);
+
+  // Attempts to open the input file if there was one identified in
+  // createArgs.
+  openIOFiles(inputFile, outputFile);
+
+  // Execute the functions.
+  if (execvp(args[0], args) == -1)
+  {
+    printf("Error!! %s\n", strerror(errno));
+    fflush(stdout);
+    int k;
+    for (k = 0; k < 512; k++)
+    {
+      if (args[k] == NULL)
+        continue;
+      free(args[k]);
+    }
+    free(input);
+    exit(14);
+  }
 }
 
-/* Create an arguments array from a string */
-void buildArgv(char **current, char *str)
+void openIOFiles(char *in, char *out)
 {
-  /* Parse command args */
-  int max = strlen(str);
-
-  int arg = 0;
-  int prevPos = 0;
-  int pos = findSpace(str, 0);
-  while (prevPos != -1)
+  // If there is an input file specified, try to read from it.
+  if (in[0] != '\0')
   {
-    int end = pos != -1 ? pos : max;
-    if (prevPos != 0)
-      prevPos++;
-    char *s = (char *)malloc((end - prevPos) * sizeof(char));
-    int i;
-    for (i = 0; i < end - prevPos; i++)
+    int fdIn = open(in, O_RDONLY);
+    if (fdIn == -1)
     {
-      s[i] = str[prevPos + i];
+      perror(in);
+      // Clean up memory
+      exit(17);
     }
-    current[arg] = s;
-    arg++;
-    prevPos = pos;
-    pos = findSpace(str, pos + 1);
+    int inResult = dup2(fdIn, 0);
+    if (inResult == -1)
+    {
+      perror("dup2");
+      // Clean up memory
+      exit(11);
+    }
+    fcntl(fdIn, F_SETFD, FD_CLOEXEC);
+  }
+  if (out[0] != '\0')
+  {
+    int fdOut = open(out, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fdOut == -1)
+    {
+      perror("open");
+      // Clean up memory
+      exit(12);
+    }
+    int outResult = dup2(fdOut, 1);
+    if (outResult == -1)
+    {
+      perror("dup2");
+      // Clean up memory
+      exit(13);
+    }
+    fcntl(fdOut, F_SETFD, FD_CLOEXEC);
   }
 }
 
-int commandLen(char *cmd)
+void createArgs(char *input, char **args, char *inputFile, char *outputFile)
 {
+  bool in = false;
+  bool out = false;
+  int size = 0;
 
-  /* Get command length */
-  /* Count the number of arguments */
-  int n = 0;
-  int i = 0;
-  for (i = 0; i < strlen(cmd); i++)
+  char *arg = strtok(input, " ");
+
+  strcpy(args[size], arg);
+  size++;
+  while (arg)
   {
-    if ((int)cmd[i] == 32)
+    arg = strtok(NULL, " ");
+    if (arg)
     {
-      n++;
+      if (in)
+      {
+        strcpy(inputFile, arg);
+        in = false;
+      }
+      else if (out)
+      {
+        strcpy(outputFile, arg);
+        out = false;
+      }
+      else if (strcmp(arg, "$$") == 0)
+      {
+        int pidInt = (int)getpid();
+        char pid[10];
+        memset(pid, '\0', sizeof(pid));
+        snprintf(pid, 10, "%d", pidInt);
+        strcpy(args[size], pid);
+        size++;
+      }
+      else if (strcmp(arg, "<") == 0)
+      {
+        in = true;
+      }
+      else if (strcmp(arg, ">") == 0)
+      {
+        out = true;
+      }
+      else
+      {
+        strcpy(args[size], arg);
+        size++;
+      }
+    }
+    else
+    {
+      free(args[size]);
+      args[size] = NULL;
+      size++;
     }
   }
-  n += 2; /* There is always 1 NULL argument that is appended, and 1 uncounted
-             argument */
-  return n;
-}
-
-int searchPipe(int c, char *cmd)
-{
-  /* SearchPipe can be used to find either pipe */
-  /* I could have made a struct with both boolean "pipe found" variables in
-     it, but I found this easier to implement */
-  char pipe = c == 0 ? '>' : '<';
-  int i = 0;
-  while (i < strlen(cmd) - 1)
-  {
-    if (cmd[i] == pipe)
-      return i;
-    i++;
-  }
-  return -1;
-}
-
-void setInOut(char *cmd, int reDirOut, int reDirIn)
-{
-
-  int endCmd = INT_MAX;
-
-  if (reDirIn != -1)
-  {
-    endCmd = reDirIn;
-    reDirIn += 2;
-    /* Save the name of the new input */
-    int end = findSpace(cmd, reDirIn) != -1 ? findSpace(cmd, reDirIn) : strlen(cmd) - 1;
-    char *name = (char *)malloc((end - reDirIn) * sizeof(char));
-    memcpy(name, &cmd[reDirIn], (end - reDirIn));
-
-    /* Create FD and re-assign input */
-    int targetFD1 = open(name, O_RDONLY);
-    if (targetFD1 < 0)
-    {
-      fprintf(stderr, "cannot open %s for input\n", name);
-      exit(1);
-    }
-    if (dup2(targetFD1, STDIN_FILENO) == -1)
-    {
-      printf("Error!");
-      fflush(stdout);
-    }
-
-    free(name);
-  }
-
-  if (reDirOut != -1)
-  {
-    endCmd = reDirOut < endCmd ? reDirOut : endCmd;
-    reDirOut += 2;
-    /* Save the name of the new output */
-    int end = findSpace(cmd, reDirOut) != -1 ? findSpace(cmd, reDirOut) : strlen(cmd) - 1;
-    char *name = (char *)malloc((end - reDirOut) * sizeof(char));
-    memcpy(name, &cmd[reDirOut], (end - reDirOut));
-
-    /* Create FD and re-assign input */
-    int targetFD2 = open(name, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if (targetFD2 < 0)
-    {
-      fprintf(stderr, "cannot open %s for input\n", name);
-      exit(1);
-    }
-    if (dup2(targetFD2, STDOUT_FILENO) == -1)
-    {
-      printf("Error!");
-      fflush(stdout);
-    }
-
-    free(name);
-  }
-
-  /* Format command */
-  endCmd = endCmd < INT_MAX ? endCmd - 1 : strlen(cmd) - 1;
-  char *command = (char *)malloc(endCmd * sizeof(char));
-  memcpy(command, cmd, endCmd);
-
-  /* Execute command */
-  /* Build char* const* array for command */
-  int n = commandLen(command);
-  char *argv[n];
-  buildArgv(argv, command); /* Manipulates argv */
-  argv[n - 1] = NULL;       /* Last arg is always 0 */
-
-  /* Execute command */
-  if (execvp(argv[0], argv) == -1)
-  {
-
-    printf("Error! %s\n", strerror(errno));
-    exit(1);
-  }
-  exit(1);
 }
 
 void nullOutput()
@@ -377,29 +395,37 @@ void nullOutput()
   int targetFD = open("/dev/null", O_WRONLY | O_CREAT | O_TRUNC, 0644);
   if (targetFD < 0)
   {
-    fprintf(stderr, "cannot open /dev/null for input\n");
-    exit(1);
+    perror("/dev/null");
+    // Clean up memory
+    exit(21);
   }
   if (dup2(targetFD, STDOUT_FILENO) == -1)
   {
-    printf("Error!");
-    fflush(stdout);
+    perror("dup2");
+    // Clean up memory
+    exit(22);
   }
 }
 
-void handleSignal(int bigSig)
+void catchSIGINT(int signo)
 {
-  if (bigSig == 2)
+
+  char *sigMessage = "SIGINT. Use CTRL-Z to Stop.\n";
+  write(STDOUT_FILENO, sigMessage, 28);
+}
+
+void catchSIGTSTP(int signo)
+{
+  if (isForegroundMode)
   {
-    signal(SIGINT, handleSignal);
-    printf("terminated by signal %d\n", bigSig);
-    parentStatus = bigSig;
+    sigMessage = "Exiting foreground-only mode\n";
+    sigLength = 29;
   }
-  else if (bigSig == 20)
+  else
   {
-    signal(SIGTSTP, handleSignal);
-    isForegroundMode ? printf("Exiting foreground-only mode\n") : printf("Entering foreground-only mode (& is now ignored)\n");
-    isForegroundMode = !isForegroundMode;
+    sigMessage = "Entering foreground-only mode (& is now ignored)\n";
+    sigLength = 49;
   }
-  fflush(stdout);
+  isForegroundMode = !isForegroundMode;
+  write(STDOUT_FILENO, sigMessage, sigLength);
 }
