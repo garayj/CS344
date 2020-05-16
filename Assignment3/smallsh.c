@@ -201,39 +201,6 @@ int getInput(char *input)
   return getline(&input, &BUFFER_SIZE, stdin);
 }
 
-void findAndReplaceDollars(char *input, char **inputAddress)
-{
-  int pidInt = (int)getpid();
-  char pid[10];
-  memset(pid, '\0', sizeof(pid));
-  char *dollars = "$$";
-  snprintf(pid, 10, "%d", pidInt);
-
-  char *dest = calloc(strlen(input) - strlen(dollars) + strlen(pid) + 1, sizeof(char));
-  char *destptr = dest;
-
-  *dest = 0;
-
-  while (*input)
-  {
-    if (!strncmp(input, dollars, strlen(dollars)))
-    {
-      strcat(destptr, pid);
-      input += strlen(dollars);
-      destptr += strlen(pid);
-    }
-    else
-    {
-      *destptr = *input;
-      destptr++;
-      input++;
-    }
-  }
-  *destptr = 0;
-  free(*inputAddress);
-  *inputAddress = dest;
-}
-
 bool commentOrEmptyCheck(int numChars, char *input)
 {
   if (numChars == -1)
