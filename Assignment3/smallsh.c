@@ -5,6 +5,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <errno.h>
+#include <math.h>
 #include <fcntl.h>
 #include <limits.h>
 #include <signal.h>
@@ -26,33 +27,52 @@ void handleSignal(int);
 void createArgs(char *, char **, char *, char *);
 void openIOFiles(char *, char *);
 void executeSystemCall(char *);
-void nullOutput();
+void backgroundNullOut();
 void catchSIGINT(int);
 void catchSIGTSTP(int);
 
 // Global variables.
-sigset_t my_signal_set;
+pid_t backgroundThreads[100];
+int numberOfBackgroundThreads = 0;
+int backgroundThreadsStatus[100];
 bool isForegroundMode = false;
 size_t BUFFER_SIZE = 2049;
 pid_t childThread;
 char *sigMessage;
 int sigLength;
-// pid_t backgroundThreads[];
-// int backgroundStatuses[];
-int numberOfBackgroundThreads = 0;
+pid_t backgroundThreads[100];
+int backgroundStatuses[100];
 int childStatus = -99;
 int parentStatus = 0;
 
 int main()
 {
   initSignalHandlers();
+  int as;
+  for (as = 0; as < 100; as++)
+  {
+    backgroundThreadsStatus[as] = -99;
+  }
 
   // Main prompt loop
   while (true)
   {
     char *input = calloc(BUFFER_SIZE, sizeof(char));
     // Check for child process termination.
-    checkChildProcessStatus();
+    waitpid(-1, &childStatus, WNOHANG);
+    if (childStatus != -99)
+    {
+      if (WIFEXITED(childStatus))
+      {
+        printf("background pid %d is done: exit value %d\n", childStatus, WEXITSTATUS(childStatus));
+      }
+      else
+      {
+        printf("background pid %d is done: terminated by signal %d\n", childStatus, WTERMSIG(childStatus));
+      }
+      childStatus = -99;
+      fflush(stdout);
+    }
 
     // Print out the command line symbol and read input from the user.
     int numCharEntered = getInput(input);
@@ -60,8 +80,10 @@ int main()
     // Check if the input is a comment or just a newline.
     if (!commentOrEmptyCheck(numCharEntered, input))
     {
+      printf("parent status: %d\n", parentStatus);
+      fflush(stdout);
       // Store the input pointer in tmp and search and replace all instances of "$$".
-      // findAndReplaceDollars(input, &input);
+      findAndReplaceDollars(input, &input);
 
       char inputTmp[BUFFER_SIZE];
       memset(inputTmp, '\0', sizeof(inputTmp));
@@ -77,9 +99,15 @@ int main()
       }
       else if (strcmp(token, "status") == 0)
       {
-        printf("exit value %d\n", parentStatus / 256);
+        if (WIFEXITED(parentStatus) != 0)
+        {
+          printf("exit value %d\n", WEXITSTATUS(parentStatus));
+        }
+        else
+        {
+          printf("exit signal %d\n", WTERMSIG(parentStatus));
+        }
         fflush(stdout);
-        parentStatus = 0;
       }
       else if (strcmp(token, "cd") == 0)
       {
@@ -111,7 +139,7 @@ int main()
           if (!isForegroundMode)
             isBackgroundProcess = true;
         }
-        // Remove the newline character if
+        // Remove the newline character ifi
         else
           input[inputLen - 1] = '\0';
 
@@ -128,8 +156,18 @@ int main()
         else if (childThread == 0)
         {
           // Check if the child process is a background process.
+          // Redirect to /dev/null if true.
           if (isBackgroundProcess)
-            nullOutput();
+          {
+            // Store background process in array.
+            // int index;
+            // for (index = 0; index < 100; index++)
+            // {
+            // }
+            backgroundNullOut();
+          }
+
+          // Attempt to do a system call.
           executeSystemCall(input);
         }
         // Else the process is the parent process.
@@ -150,11 +188,6 @@ int main()
     }
 
     free(input);
-    if (parentStatus < 0)
-    {
-      printf("Exiting...\n");
-      return parentStatus;
-    }
   }
 
   return 0;
@@ -162,12 +195,16 @@ int main()
 
 void initSignalHandlers()
 {
+  // Clear out struct.
   struct sigaction action_SIGINT = {0};
   struct sigaction action_SIGTSTP = {0};
 
+  // Give it the catchSIGINT function
   action_SIGINT.sa_handler = catchSIGINT;
   action_SIGINT.sa_flags = 0;
+  // Tell it to ignore all other signals.
   sigfillset(&action_SIGINT.sa_mask);
+  // Tell it to do my action when you see sigint.
   sigaction(SIGINT, &action_SIGINT, NULL);
 
   action_SIGTSTP.sa_handler = catchSIGTSTP;
@@ -178,19 +215,23 @@ void initSignalHandlers()
 
 void checkChildProcessStatus()
 {
-  waitpid(-1, &childStatus, WNOHANG);
-  if (childStatus != -99)
+  int i;
+  for (i = 0; i < numberOfBackgroundThreads; i++)
   {
-    if (WIFEXITED(childStatus))
+    waitpid(-1, &backgroundThreadsStatus[i], WNOHANG);
+    if (backgroundThreadsStatus[i] != -99)
     {
-      printf("background pid %d is done: exit value %d\n", childThread, WEXITSTATUS(childStatus));
+      if (WIFEXITED(backgroundThreadsStatus[i]))
+      {
+        printf("background pid %d is done: exit value %d\n", backgroundThreads[i], WEXITSTATUS(backgroundThreadsStatus[i]));
+      }
+      else
+      {
+        printf("background pid %d is done: terminated by signal %d\n", backgroundThreads[i], WTERMSIG(backgroundThreadsStatus[i]));
+      }
+      backgroundThreadsStatus[i] = -99;
+      fflush(stdout);
     }
-    else
-    {
-      printf("background pid %d is done: terminated by signal %d\n", childThread, WTERMSIG(childStatus));
-    }
-    childStatus = -99;
-    fflush(stdout);
   }
 }
 
@@ -199,6 +240,40 @@ int getInput(char *input)
   printf(": ");
   fflush(stdout);
   return getline(&input, &BUFFER_SIZE, stdin);
+}
+
+void findAndReplaceDollars(char *input, char **inputAddress)
+{
+  int pidInt = (int)getpid();
+  int length = snprintf(NULL, 0, "%d", pidInt);
+  char pid[length + 1];
+  char *dollars = "$$";
+  snprintf(pid, length + 1, "%d", pidInt);
+
+  char *dest = calloc(BUFFER_SIZE * 4, sizeof(char));
+  char *destptr = dest;
+
+  *dest = 0;
+
+  while (*input)
+  {
+    if (!strncmp(input, dollars, strlen(dollars)))
+    {
+      strcat(destptr, pid);
+      input += strlen(dollars);
+      destptr += strlen(pid);
+    }
+    else
+    {
+      *destptr = *input;
+      destptr++;
+      input++;
+    }
+  }
+
+  *destptr = 0;
+  free(*inputAddress);
+  *inputAddress = dest;
 }
 
 bool commentOrEmptyCheck(int numChars, char *input)
@@ -210,7 +285,6 @@ bool commentOrEmptyCheck(int numChars, char *input)
   }
   if (input[0] == '#' || input[0] == '\n')
   {
-    parentStatus = 0;
     return true;
   }
   return false;
@@ -324,15 +398,6 @@ void createArgs(char *input, char **args, char *inputFile, char *outputFile)
         strcpy(outputFile, arg);
         out = false;
       }
-      else if (strcmp(arg, "$$") == 0)
-      {
-        int pidInt = (int)getpid();
-        char pid[10];
-        memset(pid, '\0', sizeof(pid));
-        snprintf(pid, 10, "%d", pidInt);
-        strcpy(args[size], pid);
-        size++;
-      }
       else if (strcmp(arg, "<") == 0)
       {
         in = true;
@@ -356,7 +421,7 @@ void createArgs(char *input, char **args, char *inputFile, char *outputFile)
   }
 }
 
-void nullOutput()
+void backgroundNullOut()
 {
   /* Create FD and re-assign input */
   int targetFD = open("/dev/null", O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -377,8 +442,8 @@ void nullOutput()
 void catchSIGINT(int signo)
 {
 
-  char *sigMessage = "SIGINT. Use CTRL-Z to Stop.\n";
-  write(STDOUT_FILENO, sigMessage, 28);
+  char *sigMessage = "\n";
+  write(STDOUT_FILENO, sigMessage, 1);
 }
 
 void catchSIGTSTP(int signo)
