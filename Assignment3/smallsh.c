@@ -5,7 +5,6 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <errno.h>
-#include <math.h>
 #include <fcntl.h>
 #include <limits.h>
 #include <signal.h>
@@ -18,73 +17,53 @@ typedef enum
 } bool;
 
 // Functions
-void initSignalHandlers();
-void checkChildProcessStatus();
-int getInput(char *);
-void findAndReplaceDollars(char *, char **);
 bool commentOrEmptyCheck(int, char *);
-void handleSignal(int);
-void createArgs(char *, char **, char *, char *);
-void openIOFiles(char *, char *);
-void executeSystemCall(char *);
-void backgroundNullOut();
+int getInput(char *);
 void catchSIGINT(int);
 void catchSIGTSTP(int);
+void checkChildProcessStatus();
+void createArgs(char *, char **, char *, char *);
+void executeSystemCall(char *);
+void findAndReplaceDollars(char *, char **);
+void handleSignal(int);
+void initSignalHandlers();
+void nullOutput();
+void openFile(char *, int);
+void openIOFiles(char *, char *);
 
 // Global variables.
-pid_t backgroundThreads[100];
-int numberOfBackgroundThreads = 0;
-int backgroundThreadsStatus[100];
 bool isForegroundMode = false;
-size_t BUFFER_SIZE = 2049;
-pid_t childThread;
 char *sigMessage;
 int sigLength;
-pid_t backgroundThreads[100];
-int backgroundStatuses[100];
+int numberOfBackgroundThreads = 0;
 int childStatus = -99;
 int parentStatus = 0;
+pid_t childThread;
+size_t BUFFER_SIZE = 2049;
 
 int main()
 {
+  // Initialize signal handlers.
   initSignalHandlers();
-  int as;
-  for (as = 0; as < 100; as++)
-  {
-    backgroundThreadsStatus[as] = -99;
-  }
 
   // Main prompt loop
   while (true)
   {
     char *input = calloc(BUFFER_SIZE, sizeof(char));
-    // Check for child process termination.
-    waitpid(-1, &childStatus, WNOHANG);
-    if (childStatus != -99)
-    {
-      if (WIFEXITED(childStatus))
-      {
-        printf("background pid %d is done: exit value %d\n", childStatus, WEXITSTATUS(childStatus));
-      }
-      else
-      {
-        printf("background pid %d is done: terminated by signal %d\n", childStatus, WTERMSIG(childStatus));
-      }
-      childStatus = -99;
-      fflush(stdout);
-    }
 
-    // Print out the command line symbol and read input from the user.
+    // Check for child process termination.
+    checkChildProcessStatus();
+
+    // Print out the command line symbol and get input from the user.
     int numCharEntered = getInput(input);
 
-    // Check if the input is a comment or just a newline.
+    // Check if the input is a comment, newline or a signal.
     if (!commentOrEmptyCheck(numCharEntered, input))
     {
-      printf("parent status: %d\n", parentStatus);
-      fflush(stdout);
       // Store the input pointer in tmp and search and replace all instances of "$$".
       findAndReplaceDollars(input, &input);
 
+      // TODO Maybe just tokenize here and create the args.
       char inputTmp[BUFFER_SIZE];
       memset(inputTmp, '\0', sizeof(inputTmp));
       strcpy(inputTmp, input);
@@ -99,15 +78,21 @@ int main()
       }
       else if (strcmp(token, "status") == 0)
       {
-        if (WIFEXITED(parentStatus) != 0)
+        waitpid(-1, &parentStatus, WNOHANG);
+        if (parentStatus != -99)
         {
-          printf("exit value %d\n", WEXITSTATUS(parentStatus));
+          if (WIFEXITED(parentStatus))
+          {
+            printf("exit value %d\n", WEXITSTATUS(parentStatus));
+          }
+          else
+          {
+            printf("terminated by signal %d\n", WTERMSIG(parentStatus));
+          }
+          parentStatus = -99;
+          fflush(stdout);
         }
-        else
-        {
-          printf("exit signal %d\n", WTERMSIG(parentStatus));
-        }
-        fflush(stdout);
+        parentStatus = 0;
       }
       else if (strcmp(token, "cd") == 0)
       {
@@ -137,14 +122,18 @@ int main()
           // Check if we are runnning in foreground mode. If we aren't
           // switch the flag to true. In any case, remove the ampersand.
           if (!isForegroundMode)
+          {
             isBackgroundProcess = true;
+          }
         }
-        // Remove the newline character ifi
+        // Remove the newline character if
         else
           input[inputLen - 1] = '\0';
 
         // Create a child thread.
         childThread = fork();
+        // printf("This is the childThread: %d\n", (int)childThread);
+        // printf("This is the input: %s\n", input);
         // If the creation of the thread is corrupted somehow,
         // shoot out an error.
         if (childThread == -1)
@@ -156,18 +145,9 @@ int main()
         else if (childThread == 0)
         {
           // Check if the child process is a background process.
-          // Redirect to /dev/null if true.
           if (isBackgroundProcess)
-          {
-            // Store background process in array.
-            // int index;
-            // for (index = 0; index < 100; index++)
-            // {
-            // }
-            backgroundNullOut();
-          }
-
-          // Attempt to do a system call.
+            openFile("/dev/null", 2);
+          // nullOutput();
           executeSystemCall(input);
         }
         // Else the process is the parent process.
@@ -195,43 +175,35 @@ int main()
 
 void initSignalHandlers()
 {
-  // Clear out struct.
   struct sigaction action_SIGINT = {0};
   struct sigaction action_SIGTSTP = {0};
 
-  // Give it the catchSIGINT function
   action_SIGINT.sa_handler = catchSIGINT;
-  action_SIGINT.sa_flags = 0;
-  // Tell it to ignore all other signals.
+  action_SIGINT.sa_flags = SA_RESTART;
   sigfillset(&action_SIGINT.sa_mask);
-  // Tell it to do my action when you see sigint.
   sigaction(SIGINT, &action_SIGINT, NULL);
 
   action_SIGTSTP.sa_handler = catchSIGTSTP;
-  action_SIGTSTP.sa_flags = 0;
+  action_SIGTSTP.sa_flags = SA_RESTART;
   sigfillset(&action_SIGTSTP.sa_mask);
   sigaction(SIGTSTP, &action_SIGTSTP, NULL);
 }
 
 void checkChildProcessStatus()
 {
-  int i;
-  for (i = 0; i < numberOfBackgroundThreads; i++)
+  pid_t terminatedChild = waitpid(-1, &childStatus, WNOHANG);
+  if (childStatus != -99)
   {
-    waitpid(-1, &backgroundThreadsStatus[i], WNOHANG);
-    if (backgroundThreadsStatus[i] != -99)
+    if (WIFEXITED(childStatus))
     {
-      if (WIFEXITED(backgroundThreadsStatus[i]))
-      {
-        printf("background pid %d is done: exit value %d\n", backgroundThreads[i], WEXITSTATUS(backgroundThreadsStatus[i]));
-      }
-      else
-      {
-        printf("background pid %d is done: terminated by signal %d\n", backgroundThreads[i], WTERMSIG(backgroundThreadsStatus[i]));
-      }
-      backgroundThreadsStatus[i] = -99;
-      fflush(stdout);
+      printf("background pid %d is done: exit value %d\n", (int)terminatedChild, WEXITSTATUS(childStatus));
     }
+    else
+    {
+      printf("background pid %d is done: terminated by signal %d\n", (int)terminatedChild, WTERMSIG(childStatus));
+    }
+    childStatus = -99;
+    fflush(stdout);
   }
 }
 
@@ -285,6 +257,7 @@ bool commentOrEmptyCheck(int numChars, char *input)
   }
   if (input[0] == '#' || input[0] == '\n')
   {
+    parentStatus = 0;
     return true;
   }
   return false;
@@ -313,7 +286,11 @@ void executeSystemCall(char *input)
 
   // Attempts to open the input file if there was one identified in
   // createArgs.
-  openIOFiles(inputFile, outputFile);
+  if (inputFile[0] != '\0')
+    openFile(inputFile, 0);
+  if (outputFile[0] != '\0')
+    openFile(outputFile, 1);
+  // openIOFiles(inputFile, outputFile);
 
   // Execute the functions.
   if (execvp(args[0], args) == -1)
@@ -330,6 +307,51 @@ void executeSystemCall(char *input)
     free(input);
     exit(14);
   }
+}
+
+void openFile(char *file, int type)
+{
+  int openError[] = {11, 12, 13};
+  int dupError[] = {21, 22, 23};
+  int fd;
+  int result;
+  switch (type)
+  {
+  case 0:
+    fd = open(file, O_RDONLY);
+    break;
+  case 1:
+  case 2:
+    fd = open(file, O_WRONLY | O_CREAT | O_TRUNC);
+    break;
+  }
+  if (fd == -1)
+  {
+    perror(file);
+    // Clean up memory
+    exit(openError[type]);
+  }
+
+  switch (type)
+  {
+  case 0:
+    result = dup2(fd, 0);
+    break;
+  case 1:
+    result = dup2(fd, 1);
+    break;
+  case 2:
+    result = dup2(fd, STDOUT_FILENO);
+    break;
+  }
+
+  if (result == -1)
+  {
+    perror("dup2");
+    // Clean up memory
+    exit(dupError[type]);
+  }
+  fcntl(fd, F_SETFD, FD_CLOEXEC);
 }
 
 void openIOFiles(char *in, char *out)
@@ -421,7 +443,7 @@ void createArgs(char *input, char **args, char *inputFile, char *outputFile)
   }
 }
 
-void backgroundNullOut()
+void nullOutput()
 {
   /* Create FD and re-assign input */
   int targetFD = open("/dev/null", O_WRONLY | O_CREAT | O_TRUNC, 0644);
