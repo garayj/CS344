@@ -87,6 +87,16 @@ int main()
       // Check for exit.
       if (strcmp(token, "exit") == 0)
       {
+
+        int status = -99;
+        pid_t test = waitpid(-1, &status, WNOHANG);
+
+        while ((int)test != -1)
+        {
+          kill(test, SIGTERM);
+          test = waitpid(-1, &status, WNOHANG);
+        }
+
         free(input);
         return 0;
       }
