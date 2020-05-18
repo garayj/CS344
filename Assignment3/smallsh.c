@@ -35,6 +35,7 @@ void openFile(char *, int);
 
 // Global variables.
 bool isForegroundMode = false;
+bool isBackgroundProcess = false;
 
 char *args[512];
 char *input;
@@ -42,13 +43,13 @@ char *sigMessage;
 
 int argSize = 0;
 int childStatus = -99;
-int numberOfBackgroundThreads = 0;
 int parentStatus = 0;
 int sigLength;
 
 pid_t childThread;
 
 size_t BUFFER_SIZE = 2049;
+struct sigaction action_SIGINT = {0}, action_SIGTSTP = {0};
 
 int main()
 {
@@ -89,12 +90,12 @@ int main()
       {
 
         int status = -99;
-        pid_t test = waitpid(-1, &status, WNOHANG);
+        pid_t childProcess = waitpid(-1, &status, WNOHANG);
 
-        while ((int)test != -1)
+        while ((int)childProcess != -1)
         {
-          kill(test, SIGTERM);
-          test = waitpid(-1, &status, WNOHANG);
+          kill(childProcess, SIGTERM);
+          childProcess = waitpid(-1, &status, WNOHANG);
         }
 
         free(input);
@@ -136,7 +137,7 @@ int main()
       // The command is not one of the ones I handle.
       else
       {
-        bool isBackgroundProcess = false;
+        isBackgroundProcess = false;
 
         // Look for if the process needs to run in the background.
         if (input[strlen(input) - 2] == '&')
@@ -170,10 +171,17 @@ int main()
 
         // If the process is the child process.
         case 0:
-
+          action_SIGTSTP.sa_handler = SIG_IGN;
+          sigaction(SIGTSTP, &action_SIGTSTP, NULL);
+          action_SIGINT.sa_handler = SIG_DFL;
+          sigaction(SIGINT, &action_SIGINT, NULL);
           // Check if the child process is a background process.
           if (isBackgroundProcess)
+          {
+            action_SIGINT.sa_handler = SIG_IGN;
+            sigaction(SIGINT, &action_SIGINT, NULL);
             openFile("/dev/null", 2);
+          }
           executeSystemCall();
 
         // Else the process is the parent process.
@@ -190,7 +198,9 @@ int main()
 
           // Else, wait for the process to finish.
           else
+          {
             waitpid(childThread, &parentStatus, 0);
+          }
           break;
         }
       }
@@ -207,8 +217,6 @@ int main()
 void initSignalHandlers()
 {
   // Taken from the 3.3 notes.
-  struct sigaction action_SIGINT = {0};
-  struct sigaction action_SIGTSTP = {0};
 
   action_SIGINT.sa_handler = catchSIGINT;
   action_SIGINT.sa_flags = SA_RESTART;
@@ -230,9 +238,8 @@ void checkChildProcessStatus()
 
   // If that child isn't a garbage value, the check if it was exited
   // or terminated by a signal.
-  if (childStatus != -99)
+  while (childStatus != -99 && (int)terminatedChild > 0)
   {
-
     // Print the appropriate message depending on how the process finished.
     if (WIFEXITED(childStatus) != 0)
     {
@@ -246,6 +253,7 @@ void checkChildProcessStatus()
     // Reset the status to a known invalid value.
     childStatus = -99;
     fflush(stdout);
+    terminatedChild = waitpid(-1, &childStatus, WNOHANG);
   }
 }
 
@@ -316,11 +324,11 @@ bool commentOrEmptyCheck(int numChars)
 {
 
   // Check is ^C was inputted.
-  if (numChars == -1)
-  {
-    clearerr(stdin);
-    return true;
-  }
+  // if (numChars == -1)
+  // {
+  //   clearerr(stdin);
+  //   return true;
+  // }
 
   // Check is a comment or a newline character was received.
   if (input[0] == '#' || input[0] == '\n')
@@ -520,12 +528,20 @@ void catchSIGINT(int signo)
 // Catch TSTP signal and switch foreground mode.
 void catchSIGTSTP(int signo)
 {
+  // Check if the child process was a not a background process.
+  // Block until the proces is finished.
+  if (!isBackgroundProcess)
+    waitpid(childThread, &childStatus, 0);
+
+  // Print a newline if a signal was sent from the command line.
+  if (!strlen(input))
+    write(STDOUT_FILENO, "\n", 1);
 
   // If we are in foreground mode, print exit message.
   if (isForegroundMode)
   {
     sigMessage = "Exiting foreground-only mode\n";
-    sigLength = 29;
+    sigLength = 30;
   }
 
   // If we aren't in foreground mode, print enterance message.
@@ -538,4 +554,8 @@ void catchSIGTSTP(int signo)
   // Switch states.
   isForegroundMode = !isForegroundMode;
   write(STDOUT_FILENO, sigMessage, sigLength);
+
+  // Print a new prompt if a signal was sent from the command line.
+  if (!strlen(input))
+    write(STDOUT_FILENO, ": ", 2);
 }
