@@ -17,7 +17,7 @@ for i in range(3):
 randMulti = 1
 for i in range(2):
     # Create a new number.
-    randNum = random.randint(1, 43)
+    randNum = random.randint(1, 42)
     # Multuply and print
     randMulti = randMulti * randNum
     print(randNum)
