@@ -29,6 +29,7 @@ void error(const char *msg)
 } // Error function used for reporting issues
 void CatchSIGCHLD(int signo)
 {
+    waitpid(-1, &childStatus, 0);
     if (children > 0)
         children--;
 }
@@ -154,8 +155,7 @@ int main(int argc, char *argv[])
         // shoot out an error.
         if (childThread == -1)
         {
-            perror("Fork is bork!");
-            exit(1);
+            error("Fork is bork!");
         }
 
         // Child process path.
@@ -252,31 +252,34 @@ int main(int argc, char *argv[])
                 // Read the file
                 // Store the contents of the file in a string.
                 openAndStoreContents(fileName, &ciphertext);
-                if (ciphertext == NULL)
-                    ciphertext = "1";
-
-                // Send the length of the incoming data.
-
-                messageLength = strlen(ciphertext);
-                memset(buffer, '\0', sizeof(buffer));
-                sprintf(buffer, "%d", messageLength);
-
-                // Send meta data. Length of the incoming ciphertext.
-                charsRead = send(establishedConnectionFD, buffer, strlen(buffer), 0);
-                if (charsRead < 0)
-                    error("ERROR writing metadata to socket");
-                // Send the string back.
-                charsRead = sendAll(establishedConnectionFD, ciphertext); // Send success back
-                if (charsRead < 0)
-                    error("ERROR writing to socket");
-
-                // Free memory.
-                if (ciphertext != NULL && ciphertext != "1")
-                    free(ciphertext);
-
                 // Delete the file.
                 if (fileName != NULL)
                     remove(fileName);
+
+                if (ciphertext != NULL)
+                {
+                    messageLength = strlen(ciphertext);
+                    char payload[strlen(ciphertext) + 20];
+                    memset(payload, '\0', sizeof(payload));
+                    sprintf(payload, "%d %s", messageLength, ciphertext);
+
+                    // Send the string back.
+                    charsRead = sendAll(establishedConnectionFD, payload); // Send success back
+                    if (charsRead < 0)
+                        error("ERROR writing to socket");
+                }
+                // There was no files associated with the user.
+                else
+                {
+                    char *errorSig = "error ";
+                    charsRead = send(establishedConnectionFD, errorSig, strlen(errorSig), 0);
+                    if (charsRead < 0)
+                        error("ERROR writing metadata to socket");
+                }
+
+                // Free memory.
+                if (ciphertext != NULL)
+                    free(ciphertext);
             }
 
             // Send a Success message back to the client
