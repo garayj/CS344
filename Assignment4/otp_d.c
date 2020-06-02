@@ -197,8 +197,10 @@ int main(int argc, char *argv[])
                 char message[messageLength + 1];
                 memset(message, '\0', sizeof(message));
                 strcpy(message, strtok_r(NULL, "\0", &saveptr));
+
                 // Keep track of the number of characters received.
                 counter += strlen(message);
+
                 // Loop until the entire message is received if it wasn't received in the first packet that was sent.
                 while (messageLength > counter)
                 {
@@ -246,6 +248,7 @@ int main(int argc, char *argv[])
             }
             if (strcmp(command, "get") == 0)
             {
+
                 char fileName[256];
                 memset(fileName, '\0', sizeof(fileName));
                 getOldestFile(user, fileName);
