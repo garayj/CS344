@@ -109,7 +109,7 @@ void catchSIGCHLD(int signo)
 void setupSignalHandler()
 {
     // Signal handler for SIGCHILD
-    action_SIGCHILD.sa_handler = CatchSIGCHLD;
+    action_SIGCHILD.sa_handler = catchSIGCHLD;
     action_SIGCHILD.sa_flags = SA_RESTART;
     sigfillset(&action_SIGCHILD.sa_mask);
     sigaction(SIGCHLD, &action_SIGCHILD, NULL);
