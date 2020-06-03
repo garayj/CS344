@@ -182,7 +182,7 @@ void encrypt()
     strcpy(ciphertext, encryptedText);
 }
 
-// Decrypts the message and prints it out to stdin.
+// Decrypts the message and prints it out to stdout.
 void decrypt()
 {
     // Set up variables.
